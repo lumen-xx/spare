@@ -154,15 +154,16 @@ enum Report {
         print("Full Disk Access: \(fullDiskAccess ? "yes" : "no")")
         print("Project folders: \(context.projectRoots.map { Catalog.tilde($0, home: home) }.joined(separator: ", "))")
         var total: Int64 = 0, suggested: Int64 = 0
+        let open = OpenFiles.snapshot()
         for rule in Catalog.rules where fullDiskAccess || !rule.needsFullDiskAccess {
             let ruleStart = Date()
-            let items = rule.find(context, Cancellation()).sorted { $0.usage.bytes > $1.usage.bytes }
+            let items = OpenFiles.mark(rule.find(context, Cancellation()), with: open).sorted { $0.usage.bytes > $1.usage.bytes }
             let bytes = items.reduce(Int64(0)) { $0 + $1.usage.bytes }
             total += bytes
             if rule.safety != .review { suggested += items.filter(\.suggested).reduce(0) { $0 + $1.usage.bytes } }
             print("\n\(rule.title): \(Bytes.text(bytes)) in \(items.count) (\(String(format: "%.1f", Date().timeIntervalSince(ruleStart))) s)")
             for item in items.prefix(8) {
-                print("  \(item.suggested ? "[x]" : "[ ]") \(Bytes.text(item.usage.bytes).padding(toLength: 10, withPad: " ", startingAt: 0)) \(item.label)\(item.detail.map { " — " + $0 } ?? "")\(item.usage.shared > 0 ? " (+\(Bytes.text(item.usage.shared)) shared)" : "")")
+                print("  \(item.suggested ? "[x]" : "[ ]") \(Bytes.text(item.usage.bytes).padding(toLength: 10, withPad: " ", startingAt: 0)) \(item.label)\(item.inUseBy.map { " — in use by " + $0 } ?? item.detail.map { " — " + $0 } ?? "")\(item.usage.shared > 0 ? " (+\(Bytes.text(item.usage.shared)) shared)" : "")")
             }
             if items.count > 8 { print("  … and \(items.count - 8) more") }
         }

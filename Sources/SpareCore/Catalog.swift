@@ -43,6 +43,9 @@ public struct Item: Identifiable, Sendable, Hashable {
     public var usage: Usage
     /// Spare would select it to begin with.
     public var suggested: Bool
+    /// A running program has files open inside. Moving it would leave that program writing into the Trash, which
+    /// Finder then can't empty, so it can't be selected.
+    public var inUseBy: String?
     public var id: String { urls.map(\.path).joined(separator: "\n") }
 
     public init(urls: [URL], label: String, detail: String? = nil, usage: Usage = Usage(), suggested: Bool) {
@@ -205,12 +208,18 @@ public enum Catalog {
     static let systemCacheNames: Set<String> = ["CloudKit", "FamilyCircle", "GameKit", "GeoServices", "PassKit", "JetPackCache",
                                                 "SiriTTS", "TemporaryItems", "Metadata", "INSTALLATION", "AssetsV2"]
 
+    /// macOS's background services name their caches after themselves: "familycircled", "akd", "bird". Such names
+    /// are all lowercase letters ending in "d"; apps use their bundle identifier or a capitalised name instead.
+    public static func isSystemService(_ name: String) -> Bool {
+        name.count <= 24 && name.hasSuffix("d") && name.allSatisfy { $0.isLowercase && $0.isLetter }
+    }
+
     @Sendable static func findAppCaches(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
         let caches = context.path("Library/Caches")
         let claimed = Set(packageCaches.map { context.path($0.1).path } + [context.path("Library/Caches/com.apple.dt.Xcode").path])
         let folders = list(caches).filter { url in
             let name = url.lastPathComponent
-            return !name.hasPrefix("com.apple.") && !systemCacheNames.contains(name) && !claimed.contains(url.path)
+            return !name.hasPrefix("com.apple.") && !systemCacheNames.contains(name) && !isSystemService(name) && !claimed.contains(url.path)
         }
         let usages = measure(folders, cancel: cancel)
         var items: [Item] = []
@@ -231,7 +240,7 @@ public enum Catalog {
     }
 
     @Sendable static func findLogs(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
-        children(of: context.path("Library/Logs"), except: ["DiagnosticReports"], cancel: cancel) { url in
+        children(of: context.path("Library/Logs"), except: ["DiagnosticReports", "CoreSimulator", "com.apple.xpc.launchd"], cancel: cancel) { url in
             (url.deletingPathExtension().lastPathComponent, modified(url).map { "Last written " + ago($0, from: context.now) })
         }.filter { $0.usage.bytes >= 100_000 }.map { var item = $0; item.suggested = true; return item }
     }

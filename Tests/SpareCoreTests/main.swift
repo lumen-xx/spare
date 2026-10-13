@@ -181,6 +181,26 @@ write("taken/item.bin", bytes: 1)
 let taken = (try? Trash.putBack(TrashRecord(original: root.appendingPathComponent("taken/item.bin").path, trashed: movedAway.path, bytes: 1))) == nil
 check(taken && fm.fileExists(atPath: movedAway.path), "never replaces something new when putting back")
 
+// MARK: Open files
+
+let busy = folder("busy")
+let writer = Process()
+writer.executableURL = URL(fileURLWithPath: "/bin/sh")
+writer.arguments = ["-c", "exec 3>\"$0/log.txt\"; sleep 10", busy.path]
+try writer.run()
+var open: [String: String] = [:]
+for _ in 0..<40 where OpenFiles.user(of: busy, in: open) == nil { usleep(50_000); open = OpenFiles.snapshot() }
+check(OpenFiles.user(of: busy, in: open) != nil, "sees a file another program has open inside a folder (\(OpenFiles.user(of: busy, in: open) ?? "none"))")
+check(OpenFiles.user(of: sized, in: open) == nil, "doesn't flag folders nothing has open")
+let marked = OpenFiles.mark([Item(urls: [busy], label: "busy", suggested: true), Item(urls: [sized], label: "idle", suggested: true)], with: open)
+check(marked[0].inUseBy != nil && !marked[0].suggested && marked[1].inUseBy == nil && marked[1].suggested,
+      "an item in use is never suggested; others stay as they were")
+writer.terminate()
+writer.waitUntilExit()
+
+check(Catalog.isSystemService("familycircled") && Catalog.isSystemService("akd"), "recognises macOS service caches")
+check(!Catalog.isSystemService("Zed") && !Catalog.isSystemService("bun") && !Catalog.isSystemService("com.vendor.app"), "doesn't mistake app caches for macOS's")
+
 // MARK: Catalog
 
 check(Set(Catalog.rules.map(\.id)).count == Catalog.rules.count, "every rule has its own identifier")

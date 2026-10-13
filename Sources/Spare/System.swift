@@ -98,9 +98,21 @@ enum Trasher {
     }
 
     static func move(_ entries: [(url: URL, bytes: Int64?)], title: String) async -> Outcome {
-        let result = await Task.detached(priority: .userInitiated) { Trash.move(entries) }.value
-        var records = result.records
+        // Never move something a running program has files open in: it would keep writing into the Trash, and Finder
+        // couldn't empty it until that program quits.
+        let open = await Task.detached(priority: .userInitiated) { OpenFiles.snapshot() }.value
         var failures: [Trash.Failure] = []
+        var free: [(url: URL, bytes: Int64?)] = []
+        for entry in entries {
+            if let user = OpenFiles.user(of: entry.url, in: open) {
+                failures.append(Trash.Failure(url: entry.url, reason: "\(user) is using it. Quit \(user), then try again.", needsPermission: false))
+            } else {
+                free.append(entry)
+            }
+        }
+        let movable = free
+        let result = await Task.detached(priority: .userInitiated) { Trash.move(movable) }.value
+        var records = result.records
         for failure in result.failures {
             guard failure.needsPermission else { failures.append(failure); continue }
             switch Privileged.finderTrash(failure.url) {

@@ -193,10 +193,15 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CheckBox(state: model.selected.contains(item.id) ? .on : .off) { model.toggle(item) }
+            CheckBox(state: model.selected.contains(item.id) && item.inUseBy == nil ? .on : .off) { model.toggle(item) }
+                .disabled(item.inUseBy != nil).opacity(item.inUseBy == nil ? 1 : 0.35)
             VStack(alignment: .leading, spacing: 1) {
                 Text(item.label).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
-                if let detail = item.detail {
+                    .foregroundStyle(item.inUseBy == nil ? .primary : .secondary)
+                if let user = item.inUseBy {
+                    Text("In use by \(user) right now. Quit it to clean this.")
+                        .font(.system(size: 11)).foregroundStyle(.orange).lineLimit(1)
+                } else if let detail = item.detail {
                     Text(detail).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
             }

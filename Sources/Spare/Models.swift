@@ -139,11 +139,15 @@ final class CleanupModel: ObservableObject {
         scannedAt = nil
         let rules = Catalog.rules.filter { fullDiskAccess || !$0.needsFullDiskAccess }
         pending = Set(rules.map(\.id))
-        for rule in rules {
-            Task {
-                let items = await background { rule.find(context, token) }
-                guard !token.isCancelled else { return }
-                self.finish(rule, items.sorted { $0.usage.bytes > $1.usage.bytes })
+        Task {
+            // Taken once, before measuring: which programs have files open where Spare is about to look.
+            let open = await background { OpenFiles.snapshot() }
+            for rule in rules {
+                Task {
+                    let items = await background { OpenFiles.mark(rule.find(context, token), with: open) }
+                    guard !token.isCancelled else { return }
+                    self.finish(rule, items.sorted { $0.usage.bytes > $1.usage.bytes })
+                }
             }
         }
     }
@@ -156,7 +160,7 @@ final class CleanupModel: ObservableObject {
     }
 
     var allItems: [Item] { findings.values.flatMap(\.items) }
-    var selectedItems: [Item] { allItems.filter { selected.contains($0.id) } }
+    var selectedItems: [Item] { allItems.filter { selected.contains($0.id) && $0.inUseBy == nil } }
     var selectedBytes: Int64 { selectedItems.reduce(0) { $0 + $1.usage.bytes } }
     var foundBytes: Int64 { findings.values.reduce(0) { $0 + $1.bytes } }
 
@@ -165,17 +169,20 @@ final class CleanupModel: ObservableObject {
     }
 
     func state(_ finding: Finding?) -> CheckState {
-        guard let finding, !finding.items.isEmpty else { return .off }
-        let count = finding.items.filter { selected.contains($0.id) }.count
-        return count == 0 ? .off : count == finding.items.count ? .on : .mixed
+        guard let finding else { return .off }
+        let choosable = finding.items.filter { $0.inUseBy == nil }
+        guard !choosable.isEmpty else { return .off }
+        let count = choosable.filter { selected.contains($0.id) }.count
+        return count == 0 ? .off : count == choosable.count ? .on : .mixed
     }
 
     func toggle(_ finding: Finding) {
-        let ids = finding.items.map(\.id)
+        let ids = finding.items.filter { $0.inUseBy == nil }.map(\.id)
         if state(finding) == .on { selected.subtract(ids) } else { selected.formUnion(ids) }
     }
 
     func toggle(_ item: Item) {
+        guard item.inUseBy == nil else { return }
         if selected.contains(item.id) { selected.remove(item.id) } else { selected.insert(item.id) }
     }
 
