@@ -10,6 +10,7 @@ final class SystemChangesModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     func load() {
         #if DEBUG
@@ -17,11 +18,15 @@ final class SystemChangesModel: ObservableObject {
         #endif
         started = true
         loading = true
-        let fullDiskAccess = Shared.shared.fullDiskAccess
         Task {
-            self.rows = await background { Self.collect(fullDiskAccess: fullDiskAccess) }
+            await reload()
             self.loading = false
         }
+    }
+
+    private func reload() async {
+        let fullDiskAccess = Shared.shared.fullDiskAccess
+        rows = await background { Self.collect(fullDiskAccess: fullDiskAccess) }
     }
 
     nonisolated static func collect(fullDiskAccess: Bool) -> [SystemChange] {
@@ -47,16 +52,16 @@ final class SystemChangesModel: ObservableObject {
         return rows
     }
 
-    /// Deletes hidden accounts and printers (one administrator prompt for all of them) and resets privacy decisions.
-    /// None of this goes through the Trash.
+    /// Deletes hidden accounts and printers and removes privacy decisions, with one administrator prompt for all that
+    /// need one. None of this goes through the Trash. What counts as done is what's gone when Spare looks again.
     func apply(_ chosen: [SystemChange]) async {
         let items = chosen.filter(\.removable)
         guard !items.isEmpty, !working else { return }
         working = true
         defer { working = false }
-        var done = 0
         var problems: [String] = []
         var asAdministrator: [String] = []
+        var mine: [(service: String, client: String)] = [], everyone: [(service: String, client: String)] = []
         for item in items {
             switch item.action {
             case .deleteAccount(let name):
@@ -64,27 +69,34 @@ final class SystemChangesModel: ObservableObject {
                 asAdministrator.append("dscl . -delete /Users/\(Privileged.quoted(name)); dscl . -delete /Groups/\(Privileged.quoted(name)) 2>/dev/null")
             case .deletePrinter(let queue):
                 asAdministrator.append("lpadmin -x \(Privileged.quoted(queue))")
-            case .resetPrivacy(let service, let client):
-                let result = await background { Shell.run("/usr/bin/tccutil", ["reset", service, client], timeout: 20) }
-                if result.succeeded { done += 1 }
-                // Decisions in the system's database can only be reset as an administrator.
-                else { asAdministrator.append("tccutil reset \(Privileged.quoted(service)) \(Privileged.quoted(client))") }
+            case .resetPrivacy(let service, let client, let systemWide):
+                if systemWide { everyone.append((service, client)) } else { mine.append((service, client)) }
             case .settings:
                 break
             }
         }
+        if !mine.isEmpty {
+            let script = PrivacyTool.script(mine), timeout = 30 + 10 * Double(mine.count)
+            _ = await background { Shell.run("/bin/sh", ["-c", script], timeout: timeout) }
+        }
+        // Decisions for the whole Mac can only be removed as an administrator.
+        if !everyone.isEmpty { asAdministrator.append(PrivacyTool.script(everyone)) }
         if !asAdministrator.isEmpty {
             let command = asAdministrator.map { "(\($0))" }.joined(separator: "; ")
             if let problem = Privileged.run(command + "; true", prompt: "Spare wants to change \(asAdministrator.count == 1 ? "a setting" : "\(asAdministrator.count) settings") for every account.") {
                 if problem != "Cancelled." { problems.append(problem) }
-            } else {
-                done += asAdministrator.count
+                else if asAdministrator.count == items.count { return }
             }
         }
-        load()
-        guard done > 0 || !problems.isEmpty else { return }
-        Shared.shared.banner = .init(title: done == 1 ? "Changed 1 item" : "Changed \(done) items",
-                                     detail: items.contains { if case .resetPrivacy = $0.action { true } else { false } } ? "Apps ask for permission again the next time they need it." : nil,
+        await reload()
+        let left = items.filter { item in rows.contains { $0.id == item.id } }
+        let done = items.count - left.count
+        if !left.isEmpty, problems.isEmpty {
+            problems = left.map { "\($0.name) is still there." }
+        }
+        let verb = items.allSatisfy { if case .deletePrinter = $0.action { true } else { false } } ? "Removed" : "Deleted"
+        Shared.shared.banner = .init(title: done == 0 ? "Nothing was \(verb.lowercased())" : done == 1 ? "\(verb) 1 item" : "\(verb) \(done) items",
+                                     detail: left.isEmpty ? nil : left.count == 1 ? "macOS kept 1 item." : "macOS kept \(left.count) items.",
                                      problems: problems, failed: done == 0)
     }
 }
@@ -136,7 +148,7 @@ struct ChangesView: View {
         .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading).help("Look Again")
             }
         }
@@ -189,12 +201,12 @@ struct ChangesView: View {
         }
     }
 
-    private var actionTitle: String { kind == .privacy ? "Reset" : kind == .account ? "Delete" : "Remove" }
+    private var actionTitle: String { kind == .printer ? "Remove" : "Delete" }
 
     private var confirmTitle: String {
         let count = chosen.filter(\.removable).count
         switch kind {
-        case .privacy: return count == 1 ? "Reset this permission?" : "Reset \(count) permissions?"
+        case .privacy: return count == 1 ? "Delete this permission?" : "Delete \(count) permissions?"
         case .account: return count == 1 ? "Delete this hidden account?" : "Delete \(count) hidden accounts?"
         default: return count == 1 ? "Remove this printer?" : "Remove \(count) printers?"
         }
@@ -202,7 +214,7 @@ struct ChangesView: View {
 
     private var confirmMessage: String {
         switch kind {
-        case .privacy: "macOS forgets these decisions; the apps ask again the next time they need access. Decisions for every account need an administrator password."
+        case .privacy: "macOS deletes these entries from its permission database. An app that's still installed asks again the next time it needs access. Entries for every account need an administrator password."
         case .account: "These accounts were created by installers to run their helpers; nobody logs in with them. This can't be undone from the Trash, and macOS asks for an administrator password."
         default: "You can add the printer again in Printers & Scanners settings. macOS asks for an administrator password."
         }

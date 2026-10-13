@@ -42,7 +42,7 @@ struct SpaceView: View {
             ToolbarItemGroup {
                 Button { model.chooseFolder() } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
                     .help("Look at another folder or disk")
-                Button { model.reload() } label: { Label("Measure Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Measure Again", systemImage: "arrow.clockwise") }
                     .disabled(model.measuring > 0)
                     .help("Measure Again")
             }

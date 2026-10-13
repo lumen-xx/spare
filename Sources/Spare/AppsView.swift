@@ -13,7 +13,7 @@ struct AppsView: View {
             .arrivalStage(replay: model.apps.isEmpty)
             .toolbar {
                 ToolbarItem {
-                    Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                    Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                         .disabled(model.loading || model.orphansLoading)
                         .help("Look Again")
                 }
@@ -71,7 +71,20 @@ struct AppsView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .modifier(NoTopScrollEdge())
             .arrives(2)
+        }
+    }
+}
+
+/// The app's details scroll beside the list, so macOS would shade only their half of the toolbar. Without the shade,
+/// and clipped below the toolbar, the header looks the same all the way across.
+private struct NoTopScrollEdge: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26, *) {
+            content.scrollEdgeEffectHidden(true, for: .top).clipped()
+        } else {
+            content
         }
     }
 }
@@ -263,7 +276,7 @@ struct LeftoversView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading || model.orphansLoading).help("Look Again")
             }
         }

@@ -19,6 +19,7 @@ final class PurgeableModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     /// What Spare can free now: the parts it offers, as measured at the urgency each is freed at.
     var freeable: Int64 { CacheDelete.Service.allCases.filter(\.spareFrees).reduce(0) { $0 + bytes($1) } }
@@ -152,7 +153,7 @@ struct PurgeableView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.measuring || model.freeing != nil).help("Look Again")
             }
         }

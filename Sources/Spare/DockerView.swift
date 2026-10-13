@@ -18,6 +18,7 @@ final class DockerModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     var total: Int64 { disks.reduce(0) { $0 + $1.bytes } }
     var reclaimable: Int64 { usage.filter { Clearing(kind: $0.kind) != nil }.reduce(0) { $0 + $1.reclaimable } }
@@ -148,7 +149,7 @@ struct DockerView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading || model.working != nil).help("Look Again")
             }
         }

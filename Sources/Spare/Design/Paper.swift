@@ -119,17 +119,28 @@ extension View {
     }
 }
 
-/// A card on the paper: off-white, a hairline edge, evenly rounded corners and a light desk shadow.
+/// Rows that light up under the pointer sit this far inside their card on every side, and their wash is rounded so
+/// its corners follow the card's 14 pt ones.
+enum RowWash {
+    static let inset: CGFloat = 4
+    static let radius: CGFloat = 14 - inset
+}
+
+/// A card on the paper: off-white, a hairline edge, evenly rounded corners and a light desk shadow. `hoverRows`
+/// keeps rows with a hover wash `RowWash.inset` from its top and bottom; the rows keep it from the sides.
 struct Card<Content: View>: View {
     var radius: CGFloat = 14
     var lift: CGFloat = 1
     var fill: Color = Ink.card
+    var hoverRows = false
     @ViewBuilder var content: Content
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         let shape = RoundedRectangle.continuous(radius)
+        // Each row also keeps 1 pt above and below its wash, so neighbouring washes never touch.
         VStack(alignment: .leading, spacing: 0) { content }
+            .padding(.vertical, hoverRows ? RowWash.inset - 1 : 0)
             .background(shape.fill(fill))
             .overlay {
                 shape.strokeBorder(Ink.line, lineWidth: contrast == .increased ? 1.25 : 0.75)

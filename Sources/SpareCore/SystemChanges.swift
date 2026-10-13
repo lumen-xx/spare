@@ -13,8 +13,9 @@ public struct SystemChange: Identifiable, Sendable, Hashable {
         case deleteAccount(String)
         /// Remove an added printer (needs an administrator).
         case deletePrinter(String)
-        /// Forget a privacy decision, so the app has to ask again.
-        case resetPrivacy(service: String, client: String)
+        /// Remove a privacy decision from macOS's permission database: for the whole Mac (`systemWide`, needs an
+        /// administrator) or this account. `client` is a bundle identifier.
+        case resetPrivacy(service: String, client: String, systemWide: Bool)
         /// Only System Settings can change it.
         case settings(String)
     }
@@ -181,9 +182,9 @@ public enum SystemChanges {
                                 detail: [permission, byPath ? client : (owner == nil ? nil : client), modified.map { "decided " + Catalog.ago($0, from: Date()) }]
                                     .compactMap { $0 }.joined(separator: " · "),
                                 state: state, owner: owner, ownerGone: gone,
-                                // tccutil only knows apps by bundle identifier; paths are changed in Privacy & Security settings.
+                                // tccutil only knows apps by bundle identifier; paths are removed in Privacy & Security settings.
                                 action: byPath ? .settings("x-apple.systempreferences:com.apple.preference.security?Privacy")
-                                    : .resetPrivacy(service: service.replacingOccurrences(of: "kTCCService", with: ""), client: client))
+                                    : .resetPrivacy(service: service, client: client, systemWide: scope == "system"))
         }
     }
 }

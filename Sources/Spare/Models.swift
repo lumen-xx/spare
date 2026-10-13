@@ -437,6 +437,7 @@ final class AppsModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
     func loadIfStarted() { if started { load() } }
 
     #if DEBUG
@@ -679,5 +680,28 @@ final class HistoryModel: ObservableObject {
     func forget(_ id: UUID) {
         sessions.removeAll { $0.id == id }
         store.save(sessions)
+    }
+}
+
+/// Look Again on any page: forgets what Spare measured and reads everything again, from disk, for every page opened so
+/// far, plus the disk and the Trash. Pages not opened yet read fresh when they are.
+@MainActor
+enum Refresh {
+    static func everything() {
+        Shared.shared.refreshSpace()
+        CleanupModel.shared.scanIfStarted()
+        SpaceModel.shared.reloadIfStarted()
+        AppsModel.shared.reloadIfStarted()
+        MacDownloadsModel.shared.reloadIfStarted()
+        PurgeableModel.shared.reloadIfStarted()
+        CloudModel.shared.reloadIfStarted()
+        SimulatorsModel.shared.reloadIfStarted()
+        DockerModel.shared.reloadIfStarted()
+        BrowserExtensionsModel.shared.reloadIfStarted()
+        PackagesModel.shared.reloadIfStarted()
+        ExtensionsModel.shared.reloadIfStarted()
+        StartupModel.shared.reloadIfStarted()
+        SystemChangesModel.shared.reloadIfStarted()
+        HomeModel.shared.reloadIfStarted()
     }
 }

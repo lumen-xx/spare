@@ -12,6 +12,7 @@ final class BrowserExtensionsModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     var everySite: Int { extensions.filter { $0.allSites && $0.enabled != false }.count }
 
@@ -85,7 +86,7 @@ struct BrowserExtensionsView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading).help("Look Again")
             }
         }
@@ -122,7 +123,7 @@ struct BrowserExtensionsView: View {
                         .help(manageHint(browser))
                 }
             }
-            Card {
+            Card(hoverRows: true) {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                     AddOnRow(item: item)
@@ -165,9 +166,9 @@ private struct AddOnRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .contentShape(Rectangle())
-        .hoverWash(radius: 9)
+        .hoverWash()
         .hoverLag($hovering)
-        .padding(.horizontal, 3).padding(.vertical, 1)
+        .padding(.horizontal, RowWash.inset).padding(.vertical, 1)
         .contextMenu {
             if let url = item.url { Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
             if let app = item.containingApp { Button("Show \(app.deletingPathExtension().lastPathComponent) in Finder") { NSWorkspace.shared.activateFileViewerSelecting([app]) } }

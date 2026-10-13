@@ -18,7 +18,7 @@ struct CleanupView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.scan() } label: { Label("Scan Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Scan Again", systemImage: "arrow.clockwise") }
                     .disabled(model.isScanning || model.moving)
                     .help("Scan Again (⌘R)")
             }
@@ -86,7 +86,7 @@ struct CleanupView: View {
             SectionHeading(title: group.rawValue, subtitle: group == .review ? "Never selected for you" : nil) {
                 SizeText(bytes: model.bytes(in: group), weight: .regular).foregroundStyle(.secondary)
             }
-            Card {
+            Card(hoverRows: true) {
                 ForEach(Array(rules.enumerated()), id: \.element.id) { index, rule in
                     if index > 0 { RowDivider().padding(.leading, 62).padding(.trailing, 14) }
                     FindingRow(rule: rule)
@@ -141,9 +141,9 @@ struct FindingRow: View {
             }
             .padding(.horizontal, 11).padding(.vertical, empty || locked ? 8 : 11)
             .contentShape(Rectangle())
-            .hoverWash(radius: 10)
+            .hoverWash()
             .onTapGesture { if !empty && !locked && !pending { toggleExpanded() } }
-            .padding(.horizontal, 3).padding(.vertical, 2)
+            .padding(.horizontal, RowWash.inset).padding(.vertical, 1)
 
             if expanded, let finding, !finding.items.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {

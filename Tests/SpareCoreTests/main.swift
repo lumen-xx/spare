@@ -351,7 +351,9 @@ check(SystemChanges.profiles("There are no configuration profiles installed for 
 let privacy = SystemChanges.privacy("kTCCServiceCamera|us.zoom.xos|0|2|1700000000\nkTCCServiceMicrophone|com.apple.Safari|0|2|1\nkTCCServiceAccessibility|/usr/local/bin/gone|1|2|1\n",
                                     scope: "user", appName: { $0 == "us.zoom.xos" ? nil : "x" }, exists: { _ in false })
 check(privacy.count == 2 && privacy[0].ownerGone && privacy[0].state == "Allowed" && privacy[0].detail?.hasPrefix("Camera") == true
-      && privacy[0].action == .resetPrivacy(service: "Camera", client: "us.zoom.xos") && !privacy.contains { $0.name.contains("Safari") },
+      && privacy[0].action == .resetPrivacy(service: "kTCCServiceCamera", client: "us.zoom.xos", systemWide: false)
+      && !privacy[1].removable
+      && !privacy.contains { $0.name.contains("Safari") },
       "lists privacy permissions of apps that are gone, leaving macOS's own out")
 
 // MARK: Home folder, toolchains, hand-installed tools

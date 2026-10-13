@@ -16,6 +16,7 @@ final class SimulatorsModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     var total: Int64 { devices.reduce(0) { $0 + ($1.bytes ?? 0) } + runtimes.reduce(0) { $0 + ($1.bytes ?? 0) } }
     var broken: [Simulators.Device] { devices.filter { !$0.isAvailable } }
@@ -162,7 +163,7 @@ struct SimulatorsView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading || !model.working.isEmpty).help("Look Again")
             }
         }
@@ -228,7 +229,7 @@ struct SimulatorsView: View {
     private var devicesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Simulators", subtitle: "Each keeps its own apps and data")
-            Card {
+            Card(hoverRows: true) {
                 if model.devices.isEmpty {
                     HStack(spacing: 8) {
                         if model.loading { ThinkingDots() }
@@ -343,9 +344,9 @@ private struct DeviceRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .contentShape(Rectangle())
-        .hoverWash(radius: 9)
+        .hoverWash()
         .hoverLag($hovering)
-        .padding(.horizontal, 3).padding(.vertical, 1)
+        .padding(.horizontal, RowWash.inset).padding(.vertical, 1)
         .help(device.problem ?? "")
     }
 

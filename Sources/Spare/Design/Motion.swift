@@ -184,6 +184,6 @@ private struct HoverLag: ViewModifier {
 }
 
 extension View {
-    func hoverWash(radius: CGFloat = 8) -> some View { modifier(HoverWash(radius: radius)) }
+    func hoverWash(radius: CGFloat = RowWash.radius) -> some View { modifier(HoverWash(radius: radius)) }
     func hoverLag(_ hovering: Binding<Bool>) -> some View { modifier(HoverLag(hovering: hovering)) }
 }

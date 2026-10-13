@@ -15,6 +15,7 @@ final class CloudModel: ObservableObject {
     private var cancel = Cancellation()
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     var total: Int64 { providers.reduce(0) { $0 + $1.bytes } }
     var complete: Bool { providers.allSatisfy(\.complete) }
@@ -102,7 +103,7 @@ struct CloudView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading || model.removing != nil).help("Look Again")
             }
         }
@@ -152,7 +153,7 @@ struct CloudView: View {
                 }
             }
             if !provider.places.isEmpty {
-                Card {
+                Card(hoverRows: true) {
                     ForEach(Array(provider.places.prefix(12).enumerated()), id: \.element.id) { index, place in
                         if index > 0 { RowDivider().padding(.leading, 44).padding(.trailing, 12) }
                         PlaceRow(place: place, provider: provider.name, largest: provider.places.first?.bytes ?? 1) {
@@ -201,9 +202,9 @@ private struct PlaceRow: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .contentShape(Rectangle())
-        .hoverWash(radius: 8)
+        .hoverWash()
         .hoverLag($hovering)
-        .padding(.horizontal, 3).padding(.vertical, 1)
+        .padding(.horizontal, RowWash.inset).padding(.vertical, 1)
         .contextMenu {
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([place.url]) }
             Button("Remove Downloads…", action: remove)

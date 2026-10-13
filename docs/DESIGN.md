@@ -272,7 +272,7 @@ struct ExampleView: View {
 | --- | --- |
 | `PageScroll(maxWidth:spacing:replay:)` | Scrolling page column, centred, without scroll bars, and an arrival stage |
 | `.arrivalStage(replay:)` / `.arrives(_:rise:)` | Parts of a page arriving in order, again when `replay` turns false. Tables use `rise: 0`, so they only fade. |
-| `Card(radius:lift:fill:)` | Card with hairline and desk shadow |
+| `Card(radius:lift:fill:hoverRows:)` | Card with hairline and desk shadow. `hoverRows` keeps rows with a hover wash 4 pt from its edges (`RowWash`), so the wash's corners follow the card's. |
 | `TableCard` | A native `List` on a card, with no stripes or scroll bars |
 | `RowDivider()` | Hairline between rows |
 | `.spareButton(.primary / .secondary / .quiet / .icon)` | Buttons with squash, hover lag and focus ring. `role: .destructive` turns the label red-brown. |

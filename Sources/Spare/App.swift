@@ -175,6 +175,9 @@ struct ContentView: View {
     @ObservedObject private var cleanup = CleanupModel.shared
     @ObservedObject private var tint = AppTint.shared
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// Where the page column is in the window, for laying the message over it.
+    @State private var detail = CGRect.zero
+    private static let window = "window"
 
     private var reduceMotion: Bool {
         #if DEBUG
@@ -234,10 +237,20 @@ struct ContentView: View {
             // One toolbar backing across the page, whether or not a scrolling list touches it.
             .toolbarBackground(.visible, for: .windowToolbar)
             .background(PaperBackground().ignoresSafeArea())
-            .overlay(alignment: .bottom) {
-                BannerView().animation(reduceMotion ? Motion.calm : Motion.panel, value: shared.banner)
-            }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.window)) } action: { detail = $0 }
         }
+        // The message lives outside the split view, which builds the page column anew on every page change; inside it
+        // the message would arrive again each time. It's laid over the page column all the same.
+        .overlay(alignment: .topLeading) {
+            BannerView()
+                .animation(reduceMotion ? Motion.calm : Motion.panel, value: shared.banner)
+                .frame(width: detail.width, height: detail.height, alignment: .bottom)
+                .offset(x: detail.minX, y: detail.minY)
+                // Measured from the window's top, so laid out from there too rather than from below the toolbar.
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .ignoresSafeArea()
+        }
+        .coordinateSpace(.named(Self.window))
         .font(.spare(size: 13))
         .tint(tint.color)
         .environment(\.tintText, tint.text)

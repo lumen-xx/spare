@@ -313,7 +313,7 @@ struct MacDownloadsView: View {
         }
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading || model.freeing || model.switching != nil).help("Look Again")
             }
         }

@@ -77,6 +77,7 @@ final class StartupModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     #if DEBUG
     func showDemo(_ demo: [StartupRow]) { started = true; rows = demo }
@@ -302,7 +303,7 @@ struct StartupView: View {
             ToolbarItemGroup {
                 Button { Permissions.openLoginItemsSettings() } label: { Label("Login Items Settings", systemImage: "switch.2") }
                     .help("Open Login Items & Extensions in System Settings")
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading).help("Look Again")
             }
         }

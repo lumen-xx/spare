@@ -21,6 +21,7 @@ final class ExtensionsModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     func load() {
         #if DEBUG
@@ -194,7 +195,7 @@ struct ExtensionsView: View {
         .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading).help("Look Again")
             }
         }

@@ -27,6 +27,7 @@ final class PackagesModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func reloadIfStarted() { if started { load() } }
 
     #if DEBUG
     func showDemo(_ demo: [PackageRow], managers: [Package.Manager], unused: [String]) {
@@ -234,7 +235,7 @@ struct PackagesView: View {
         .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                Button { Refresh.everything() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
                     .disabled(model.loading).help("Look Again")
             }
         }
