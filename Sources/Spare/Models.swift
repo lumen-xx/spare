@@ -426,22 +426,13 @@ final class AppsModel: ObservableObject {
     func loadOrphans() {
         orphansLoading = true
         let installed = Set(apps.map(\.bundleID))
+        let names = apps.map(\.name)
         let running = Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
+        let runningNames = NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
         let fullDiskAccess = Shared.shared.fullDiskAccess
         Task {
-            let found = await background { () -> [Orphan] in
-                // Background jobs and their prefixes count as in use: "com.google.keystone.agent" keeps "com.google.keystone".
-                var jobs = Set<String>()
-                let labels = Array(Launchd.services(domain: "gui/\(getuid())").keys) + Array(Launchd.services(domain: "system").keys)
-                for label in labels {
-                    var parts = label.split(separator: ".").map(String.init)
-                    while parts.count >= 3 { jobs.insert(parts.joined(separator: ".")); parts.removeLast() }
-                }
-                let companies = Set((Array(installed) + Array(running) + labels).compactMap { Apps.company(of: $0) })
-                return Apps.orphans(home: home, fullDiskAccess: fullDiskAccess, cancel: Cancellation(),
-                                    companyInUse: { companies.contains($0) }) { id in
-                    installed.contains(id) || running.contains(id) || jobs.contains(id) || AppLookup.url(for: id) != nil
-                }
+            let found = await background {
+                Self.collectOrphans(installed: installed, names: names, running: running, runningNames: runningNames, fullDiskAccess: fullDiskAccess)
             }
             self.orphans = found.filter { $0.bytes > 0 }
             self.orphanSelection = self.orphanSelection.intersection(found.map(\.id))
@@ -449,7 +440,41 @@ final class AppsModel: ObservableObject {
         }
     }
 
+    /// Leftovers of removed apps in your Library and in the one every account shares.
+    nonisolated static func collectOrphans(installed: Set<String>, names: [String], running: Set<String>, runningNames: [String],
+                                           fullDiskAccess: Bool) -> [Orphan] {
+        // Background jobs and their prefixes count as in use: "com.google.keystone.agent" keeps "com.google.keystone".
+        var jobs = Set<String>()
+        let labels = Array(Launchd.services(domain: "gui/\(getuid())").keys) + Array(Launchd.services(domain: "system").keys)
+        for label in labels {
+            var parts = label.split(separator: ".").map(String.init)
+            while parts.count >= 3 { jobs.insert(parts.joined(separator: ".")); parts.removeLast() }
+        }
+        let companies = Set((Array(installed) + Array(running) + labels).compactMap { Apps.company(of: $0) })
+        let inUse: (String) -> Bool = { id in
+            installed.contains(id) || running.contains(id) || jobs.contains(id) || AppLookup.url(for: id) != nil
+        }
+        let yours = Apps.orphans(home: home, fullDiskAccess: fullDiskAccess, cancel: Cancellation(),
+                                 companyInUse: { companies.contains($0) }, inUse: inUse)
+        // Folders in /Library named after a product: in use while anything installed, running or scheduled goes by that name.
+        let words = (names + Array(installed) + Array(running) + runningNames + labels).map(letters).filter { $0.count >= 4 }
+        let dotted = (Array(installed) + Array(running) + labels).map { $0.lowercased() }
+        let nameInUse: (String) -> Bool = { name in
+            let key = letters(name)
+            guard key.count >= 4 else { return true }
+            return words.contains { $0.contains(key) || key.contains($0) } || dotted.contains { $0.hasPrefix(name.lowercased() + ".") }
+        }
+        let everyone = Apps.systemLeftovers(cancel: Cancellation(), companyInUse: { companies.contains($0) }, nameInUse: nameInUse,
+                                            origin: { Origins.origin(of: $0) }, inUse: inUse)
+        return yours + everyone
+    }
+
     var orphanBytes: Int64 { orphans.reduce(0) { $0 + $1.bytes } }
+
+    /// Letters and digits only, lowercased: "Objective Development" and "objective-development" match.
+    nonisolated static func letters(_ text: String) -> String {
+        text.replacingOccurrences(of: ".localized", with: "").lowercased().filter { $0.isLetter || $0.isNumber }
+    }
 
     func uninstall(_ app: InstalledApp) async {
         guard !working else { return }
@@ -483,9 +508,18 @@ final class AppsModel: ObservableObject {
         guard !chosen.isEmpty, !working else { return }
         working = true
         defer { working = false }
-        let entries = chosen.flatMap { $0.leftovers.map { (url: $0.url, bytes: Optional($0.usage.bytes)) } }
-        let outcome = await Trasher.move(entries, title: "Leftovers of removed apps")
-        let moved = Set(outcome.session?.records.map(\.original) ?? [])
+        // Your own leftovers go without a password; those every account shares go together after one prompt.
+        let entries = chosen.filter { !$0.forAllUsers }.flatMap { $0.leftovers.map { (url: $0.url, bytes: Optional($0.usage.bytes)) } }
+        var outcome = entries.isEmpty ? Trasher.Outcome(session: nil, failures: []) : await Trasher.move(entries, title: "Leftovers of removed apps")
+        var moved = Set(outcome.session?.records.map(\.original) ?? [])
+        let shared = chosen.filter(\.forAllUsers)
+        if !shared.isEmpty, let records = AdminTrash.move(shared.flatMap { $0.leftovers.map(\.url) },
+                                                          prompt: "Spare wants to remove leftovers that every account shares.") {
+            let session = TrashSession(title: "Leftovers of removed apps", records: records, bytes: shared.reduce(0) { $0 + $1.bytes })
+            if !records.isEmpty { HistoryModel.shared.add(session) }
+            moved.formUnion(records.map(\.original))
+            if outcome.session == nil && !records.isEmpty { outcome.session = session }
+        }
         orphans = orphans.compactMap { orphan in
             var rest = orphan
             rest.leftovers.removeAll { moved.contains($0.url.path) }

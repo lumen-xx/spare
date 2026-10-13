@@ -329,6 +329,88 @@ check(emptied.removed == 3 && emptied.needsAdministrator.isEmpty && emptied.fail
       && (try? fm.contentsOfDirectory(atPath: fakeTrash.path))?.isEmpty == true,
       "empties a Trash folder, unlocking locked files and read-only folders (\(emptied.removed) removed)")
 
+// MARK: System changes
+
+let accountList = "_amavisd 83\n_BGMXPCHelper 502\nlumen 501\nguest 201\nanna 503\n"
+let accounts = SystemChanges.accounts(list: accountList, me: "lumen") { name in
+    name == "_BGMXPCHelper" ? "NFSHomeDirectory: /var/empty\nRealName:\n Background Music XPC Helper\nUniqueID: 502\nUserShell: /usr/bin/false\n"
+        : "NFSHomeDirectory: /Users/anna\nRealName: Anna\nUserShell: /bin/zsh\n"
+}
+check(accounts.count == 2 && accounts[0].action == .deleteAccount("_BGMXPCHelper") && accounts[0].name == "Background Music XPC Helper"
+      && accounts[1].action == .settings(SystemChanges.usersSettings) && !accounts[1].removable,
+      "offers to delete an installer's hidden account, never a person's or macOS's")
+let printers = SystemChanges.printers(devices: "device for HP_Laser_MFP: dnssd://HP%20Laser._ipp._tcp.local./?uuid=1\n", states: "printer HP_Laser_MFP is idle.  enabled since Tue\n")
+check(printers.first?.name == "HP Laser MFP" && printers.first?.state == "Idle" && printers.first?.action == .deletePrinter("HP_Laser_MFP"), "reads added printers")
+let vpns = SystemChanges.vpns("Available network connection services in the current set (*=enabled):\n* (Connected)      32F36715-1592 VPN (io.tailscale.ipn.macsys) \"Tailscale\"   [VPN:io.tailscale.ipn.macsys]\n") { $0 == "io.tailscale.ipn.macsys" ? "Tailscale" : nil }
+check(vpns.first?.name == "Tailscale" && vpns.first?.state == "Connected" && vpns.first?.owner == "Tailscale" && vpns.first?.ownerGone == false, "reads VPN configurations and their app")
+check(SystemChanges.profiles("There are no configuration profiles installed for user 'lumen'").isEmpty
+      && SystemChanges.profiles("_computerlevel[1] attribute: profileIdentifier: com.vendor.mdm\n").first?.detail == "For the whole Mac", "reads configuration profiles")
+let privacy = SystemChanges.privacy("kTCCServiceCamera|us.zoom.xos|0|2|1700000000\nkTCCServiceMicrophone|com.apple.Safari|0|2|1\nkTCCServiceAccessibility|/usr/local/bin/gone|1|2|1\n",
+                                    scope: "user", appName: { $0 == "us.zoom.xos" ? nil : "x" }, exists: { _ in false })
+check(privacy.count == 2 && privacy[0].ownerGone && privacy[0].state == "Allowed" && privacy[0].detail?.hasPrefix("Camera") == true
+      && privacy[0].action == .resetPrivacy(service: "Camera", client: "us.zoom.xos") && !privacy.contains { $0.name.contains("Safari") },
+      "lists privacy permissions of apps that are gone, leaving macOS's own out")
+
+// MARK: Home folder, toolchains, hand-installed tools
+
+let fakeHome = folder("fakehome")
+write("fakehome/.ssh/id_ed25519", bytes: 10)
+write("fakehome/.cursor/extensions.json", bytes: 10)
+write("fakehome/.zsh_history", bytes: 10)
+write("fakehome/.mystery/x", bytes: 10)
+write("fakehome/.DS_Store", bytes: 10)
+let hidden = HomeItems.hidden(home: fakeHome, appInstalled: { _ in false }, toolFound: { $0 == "ssh" })
+let byName = Dictionary(uniqueKeysWithValues: hidden.map { ($0.name, $0) })
+check(byName[".ssh"]?.sensitive == true && byName[".ssh"]?.ownerGone == false && byName[".cursor"]?.ownerGone == true
+      && byName[".zsh_history"]?.kind == "History" && byName[".mystery"]?.owner == nil && byName[".DS_Store"] == nil,
+      "names hidden home items by their owner, flags keys, and notices tools that are gone")
+
+write("fakehome/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc", bytes: 10)
+write("fakehome/.nvm/versions/node/v20.11.0/bin/node", bytes: 10)
+let chains = Toolchains.find(home: fakeHome)
+check(chains.contains { $0.name == "Rust stable-aarch64-apple-darwin" && $0.removal == .command(["rustup", "toolchain", "uninstall", "stable-aarch64-apple-darwin"]) }
+      && chains.contains { $0.name == "rustup" } && chains.contains { $0.name == "Node v20.11.0" && $0.removal == .trash },
+      "finds Rust toolchains, rustup and Node versions (\(chains.map(\.name)))")
+
+let bin = folder("usrlocal/bin")
+try fm.createSymbolicLink(atPath: bin.appendingPathComponent("kubectl").path, withDestinationPath: "/Volumes/Docker/Docker.app/Contents/Resources/bin/kubectl")
+try fm.createSymbolicLink(atPath: bin.appendingPathComponent("brewed").path, withDestinationPath: "../Cellar/brewed/1.0/bin/brewed")
+try Data("#!/bin/sh\nexec xcrun --toolchain Metal \"$(basename \"$0\")\" \"$@\"\n".utf8).write(to: bin.appendingPathComponent("metal"))
+write("usrlocal/bin/gsbox", bytes: 100)
+let tools = HandTools.find(folders: [bin.path]) { _ in nil }
+let toolNames = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
+check(toolNames["kubectl"]?.kind == "Broken link" && toolNames["kubectl"]?.note?.contains("Docker") == true && toolNames["brewed"] == nil
+      && toolNames["metal"]?.origin == .apple && toolNames["gsbox"]?.origin == .thirdParty,
+      "finds hand-installed tools, broken links of removed apps, and Apple's shims, skipping Homebrew's")
+
+write("fakeetc/paths.d/com.vmware.fusion.public", bytes: 0)
+try Data("/Applications/VMware Fusion.app/Contents/Public\n".utf8).write(to: root.appendingPathComponent("fakeetc/paths.d/com.vmware.fusion.public"))
+var pathItem = Extension(category: .searchPaths, name: "com.vmware.fusion.public", url: root.appendingPathComponent("fakeetc/paths.d/com.vmware.fusion.public"),
+                         origin: .thirdParty, forAllUsers: true)
+ExtensionsChecks.searchPath(&pathItem)
+check(pathItem.note?.contains("which is gone") == true && pathItem.origin == .thirdParty, "notices a search path whose folder is gone")
+
+// System-wide leftovers: a removed product's folder is listed, macOS's and those of installed software are not.
+let systemRoot = folder("systemroot")
+write("systemroot/Library/Application Support/VMware/a.bin", bytes: 1_000)
+write("systemroot/Library/Application Support/CrashReporter/b.bin", bytes: 1_000)
+write("systemroot/Library/Application Support/Mozilla/c.bin", bytes: 1_000)
+write("systemroot/Library/Preferences/org.cups.printers.plist", bytes: 100)
+write("systemroot/Library/Preferences/com.vendor.gone.plist", bytes: 100)
+let systemLeft = Apps.systemLeftovers(root: systemRoot, cancel: Cancellation(), companyInUse: { _ in false },
+                                      nameInUse: { $0 == "Mozilla" }, origin: { _ in .thirdParty }, inUse: { _ in false })
+check(Set(systemLeft.map(\.bundleID)) == ["VMware", "com.vendor.gone"] && systemLeft.allSatisfy(\.forAllUsers),
+      "lists system-wide leftovers, never macOS's own or what installed software uses (\(systemLeft.map(\.bundleID).sorted()))")
+
+folder("systemroot/Applications/Gone Suite")
+try fm.createSymbolicLink(atPath: root.appendingPathComponent("systemroot/Applications/Gone Suite/Gone Suite").path, withDestinationPath: "/Applications/Utilities/Gone/Gone.app")
+write("systemroot/Applications/Here.app/Contents/Info.plist", bytes: 10)
+try fm.createSymbolicLink(atPath: root.appendingPathComponent("systemroot/Applications/Live link").path, withDestinationPath: root.appendingPathComponent("systemroot/Applications/Here.app").path)
+let shortcuts = Apps.systemLeftovers(root: systemRoot, cancel: Cancellation(), companyInUse: { _ in false },
+                                     nameInUse: { $0 == "Mozilla" }, origin: { _ in .thirdParty }, inUse: { _ in false })
+check(shortcuts.contains { $0.bundleID == "Gone Suite" } && !shortcuts.contains { $0.bundleID == "Live link" || $0.bundleID == "Here.app" },
+      "finds folders of shortcuts to removed apps, keeping working ones")
+
 // MARK: Catalog
 
 check(Set(Catalog.rules.map(\.id)).count == Catalog.rules.count, "every rule has its own identifier")

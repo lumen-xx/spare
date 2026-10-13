@@ -363,7 +363,7 @@ struct StartupView: View {
         let rows = chosen
         let locked = rows.filter { !$0.removable && !$0.toggleable }.count
         return HStack(spacing: 10) {
-            Text(rows.isEmpty ? "\(visible.count) items" : "\(rows.count) selected" + (locked > 0 && part == .background ? " · \(locked) changed only in Settings or by uninstalling the app" : ""))
+            Text(rows.isEmpty ? countText(visible.count, "item") : "\(rows.count) selected" + (locked > 0 && part == .background ? " · \(locked) changed only in Settings or by uninstalling the app" : ""))
                 .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
             if model.working { ProgressView().controlSize(.small) }

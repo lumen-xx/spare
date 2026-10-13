@@ -49,6 +49,8 @@ final class SystemDataModel: ObservableObject {
 }
 
 struct SystemDataView: View {
+    enum Part { case snapshots, downloads }
+    let part: Part
     @ObservedObject var model = SystemDataModel.shared
     @ObservedObject var shared = Shared.shared
     @State private var confirming: [LocalSnapshot] = []
@@ -56,10 +58,10 @@ struct SystemDataView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                Text("What macOS keeps for itself: Time Machine's snapshots on this disk, and what it downloads for its own features. Spare shows where the space goes and how to get it back without harming macOS.")
-                    .font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                snapshotsSection
-                assetsSection
+                switch part {
+                case .snapshots: snapshotsSection
+                case .downloads: assetsSection
+                }
             }
             .padding(.horizontal, 30).padding(.top, 22).padding(.bottom, 90)
             .frame(maxWidth: 860, alignment: .leading)

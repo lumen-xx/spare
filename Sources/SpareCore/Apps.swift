@@ -36,22 +36,23 @@ public struct Orphan: Identifiable, Sendable {
     public let bundleID: String
     public var leftovers: [Leftover]
     public var newest: Date?
-    public var id: String { bundleID }
+    /// In /Library, shared by every account: removing it needs an administrator password.
+    public var forAllUsers = false
+    public var id: String { (forAllUsers ? "all:" : "") + bundleID }
     public var bytes: Int64 { leftovers.reduce(0) { $0 + $1.usage.bytes } }
 }
 
 public enum Apps {
     public static func installed(home: URL) -> [InstalledApp] {
         var bundles: [URL] = []
-        for folder in [URL(fileURLWithPath: "/Applications"), home.appendingPathComponent("Applications")] {
+        // Apps sit in folders up to a few levels deep, such as "Utilities/Adobe Creative Cloud/ACC"; never inside other apps.
+        func look(in folder: URL, depth: Int) {
             for entry in Catalog.list(folder) {
                 if entry.pathExtension == "app" { bundles.append(entry) }
-                // One level of folders, such as "Adobe Photoshop 2025" or "Utilities".
-                else if (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                    bundles += Catalog.list(entry).filter { $0.pathExtension == "app" }
-                }
+                else if depth < 3, (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { look(in: entry, depth: depth + 1) }
             }
         }
+        for folder in [URL(fileURLWithPath: "/Applications"), home.appendingPathComponent("Applications")] { look(in: folder, depth: 1) }
         return bundles.compactMap { url in
             guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return nil }
             let info = bundle.infoDictionary ?? [:]
@@ -145,6 +146,74 @@ public enum Apps {
         return hostPrefixes.contains(company.lowercased()) ? nil : company
     }
 
+    /// Names macOS itself uses in /Library's Application Support, Preferences, Caches and Logs.
+    public static let systemNames: Set<String> = [
+        "App Store", "Apple", "BTServer", "CrashReporter", "GarageBand", "Logic", "ProApps", "Script Editor", "iLifeMediaBrowser", "livefsd",
+        "features.cfg", "Audio", "DirectoryService", "Logging", "OpenDirectory", "SystemConfiguration", "Xsan", "ColorSync", "Desktop Pictures",
+        "DiagnosticReports", "LKDC-setup.log", "MCXTools.log", "WindowServer", "hidfw-crashlogs", "MobileSync", "iCloud", "Bluetooth",
+        "AppleMediaServices", "Fonts", "Managed Preferences", "Keychains", "Printers", "PreferencePanes", "Mail", "Messages", "Photos", "Safari",
+        "Siri", "Spotlight", "SoftwareUpdate", "Mobile Documents", "DiskImages", "MRT", "XProtect", "Dock", "Finder", "CoreAnalytics", "powerlog",
+        "ApplePushService", "MobileDevice", "Recovery", "KernelCollections", "Developer", "Caches", "Logs", "com.apple", "AssetCache", "ARDAgent",
+        "Image Capture", "Screen Savers", "Desktop Background", "Wallpaper", "PrivilegedHelperTools", "TrustedHosts", "Classic", "Documentation"
+    ]
+
+    /// Identifiers of open-source parts of macOS that don't start with com.apple.
+    static let systemIdentifierPrefixes = ["org.cups.", "com.openssh.", "org.ntp.", "org.openldap.", "org.postfix.", "edu.mit.kerberos", "org.isc.", "com.vix."]
+
+    /// Leftovers in /Library, shared by every account: files named after a bundle identifier no installed app uses
+    /// (as for your own Library), and folders in Application Support, Preferences and Caches named after a company or
+    /// product nothing on the Mac has.
+    ///
+    /// - Parameter nameInUse: whether anything installed or running goes by this name ("VMware", "Logitech").
+    public static func systemLeftovers(root: URL = URL(fileURLWithPath: "/"), cancel: Cancellation, now: Date = Date(),
+                                       companyInUse: (String) -> Bool, nameInUse: (String) -> Bool,
+                                       origin: (URL) -> Origin, inUse: (String) -> Bool) -> [Orphan] {
+        // Stricter than for your own Library: files every account shares are left alone whenever anything from the same
+        // company is still installed, however long ago they changed (Adobe's licensing files while Creative Cloud is there).
+        var found = orphans(home: root, fullDiskAccess: false, cancel: cancel, now: now, companyInUse: companyInUse) { id in
+            inUse(id) || systemIdentifierPrefixes.contains { id.lowercased().hasPrefix($0) }
+        }.filter { orphan in company(of: orphan.bundleID).map { !companyInUse($0) } ?? true }
+        for folder in ["Library/Application Support", "Library/Preferences", "Library/Caches"] {
+            let base = root.appendingPathComponent(folder)
+            for entry in (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [] {
+                let bare = entry.replacingOccurrences(of: ".localized", with: "")
+                guard !entry.hasPrefix("."), !entry.hasPrefix("com.apple"), identifier(in: entry) == nil, !entry.hasPrefix("regid."),
+                      !systemNames.contains(bare), !systemNames.contains(entry), !nameInUse(bare) else { continue }
+                let url = base.appendingPathComponent(entry)
+                // Installed by macOS or Apple's own installers, such as GarageBand's loops.
+                guard origin(url) == .thirdParty else { continue }
+                let kind = folder.hasSuffix("Preferences") ? "Settings" : folder.hasSuffix("Caches") ? "Caches" : "Support files"
+                let usage = DiskUsage.measure(url, cancel: cancel)
+                if let index = found.firstIndex(where: { $0.bundleID == bare }) {
+                    found[index].leftovers.append(Leftover(url: url, kind: kind, usage: usage))
+                } else {
+                    found.append(Orphan(bundleID: bare, leftovers: [Leftover(url: url, kind: kind, usage: usage)], newest: Catalog.modified(url)))
+                }
+            }
+        }
+        // Shortcuts in /Applications to apps that are gone, and folders holding nothing else (an uninstaller's leftovers).
+        let applications = root.appendingPathComponent("Applications")
+        for entry in Catalog.listIncludingLinks(applications) where entry.pathExtension != "app" {
+            guard isDeadShortcut(entry) || isFolderOfDeadShortcuts(entry) else { continue }
+            found.append(Orphan(bundleID: entry.lastPathComponent, leftovers: [Leftover(url: entry, kind: "Shortcuts to a removed app", usage: DiskUsage.measure(entry))],
+                                newest: Catalog.modified(entry)))
+        }
+        return found.map { var orphan = $0; orphan.forAllUsers = true; return orphan }.sorted { $0.bytes > $1.bytes }
+    }
+
+    static func isDeadShortcut(_ url: URL) -> Bool {
+        guard let target = try? FileManager.default.destinationOfSymbolicLink(atPath: url.path) else { return false }
+        let absolute = target.hasPrefix("/") ? target : url.deletingLastPathComponent().appendingPathComponent(target).path
+        return !FileManager.default.fileExists(atPath: absolute)
+    }
+
+    /// A folder that holds only shortcuts to missing apps, and perhaps a custom folder icon.
+    static func isFolderOfDeadShortcuts(_ url: URL) -> Bool {
+        guard (try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])).map({ $0.isDirectory == true && $0.isSymbolicLink != true }) == true else { return false }
+        let entries = Catalog.listIncludingLinks(url).filter { $0.lastPathComponent != "Icon\r" && $0.lastPathComponent != "Icon" }
+        return !entries.isEmpty && entries.allSatisfy(isDeadShortcut)
+    }
+
     /// Looks like a bundle identifier: three or more dot-separated parts, starting with a letter.
     static func looksLikeIdentifier(_ text: String) -> Bool {
         let parts = text.split(separator: ".", omittingEmptySubsequences: false)
@@ -156,7 +225,8 @@ public enum Apps {
     public static func identifier(in entry: String) -> String? {
         var name = entry
         for suffix in [".plist", ".savedState", ".binarycookies"] where name.hasSuffix(suffix) { name.removeLast(suffix.count) }
-        guard looksLikeIdentifier(name), !name.hasPrefix("com.apple."), !name.hasPrefix("group."), !name.hasPrefix("systemgroup.") else { return nil }
+        guard looksLikeIdentifier(name), !name.hasPrefix("com.apple."), !name.hasPrefix("group."), !name.hasPrefix("systemgroup."),
+              !name.hasPrefix("regid.") else { return nil }
         return name
     }
 

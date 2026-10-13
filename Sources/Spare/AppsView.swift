@@ -2,37 +2,22 @@ import SwiftUI
 import SpareCore
 
 struct AppsView: View {
-    enum Mode: String, CaseIterable { case installed = "Installed", leftovers = "Leftovers" }
     enum Order: String, CaseIterable { case size = "Size", name = "Name", lastOpened = "Last Opened" }
 
     @ObservedObject var model = AppsModel.shared
-    @AppStorage("appsMode") private var mode = Mode.installed
     @AppStorage("appsOrder") private var order = Order.size
     @State private var search = ""
 
     var body: some View {
-        Group {
-            switch mode {
-            case .installed: installed
-            case .leftovers: LeftoversView()
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Picker("Show", selection: $mode) {
-                    Text("Installed").tag(Mode.installed)
-                    Text(model.orphans.isEmpty ? "Leftovers" : "Leftovers (\(Bytes.text(model.orphanBytes)))").tag(Mode.leftovers)
+        installed
+            .toolbar {
+                ToolbarItem {
+                    Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                        .disabled(model.loading || model.orphansLoading)
+                        .help("Look Again")
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
             }
-            ToolbarItem {
-                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
-                    .disabled(model.loading || model.orphansLoading)
-                    .help("Look Again")
-            }
-        }
-        .onAppear { model.startIfNeeded() }
+            .onAppear { model.startIfNeeded() }
     }
 
     private var visible: [InstalledApp] {
@@ -207,7 +192,7 @@ struct LeftoversView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if model.orphansLoading && model.orphans.isEmpty {
+            if (model.orphansLoading || model.loading) && model.orphans.isEmpty {
                 ProgressView("Looking for leftovers…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if model.orphans.isEmpty {
                 EmptyNote(symbol: "checkmark.seal", title: "No leftovers",
@@ -219,9 +204,24 @@ struct LeftoversView: View {
                             .font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Panel {
                             selectAllRow
-                            ForEach(model.orphans) { orphan in
+                            ForEach(model.orphans.filter { !$0.forAllUsers }) { orphan in
                                 Divider().padding(.leading, 40)
                                 orphanRow(orphan)
+                            }
+                        }
+                        let everyone = model.orphans.filter(\.forAllUsers)
+                        if !everyone.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("For Every Account").font(.system(size: 15, weight: .semibold))
+                                Text("In /Library, named after software that isn't on this Mac any more. Removing these asks for an administrator password once.")
+                                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 10)
+                            Panel {
+                                ForEach(Array(everyone.enumerated()), id: \.element.id) { index, orphan in
+                                    if index > 0 { Divider().padding(.leading, 40) }
+                                    orphanRow(orphan)
+                                }
                             }
                         }
                     }
@@ -246,11 +246,18 @@ struct LeftoversView: View {
                 }
             }
         }
+        .toolbar {
+            ToolbarItem {
+                Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
+                    .disabled(model.loading || model.orphansLoading).help("Look Again")
+            }
+        }
+        .onAppear { model.startIfNeeded() }
         .alert("Move the leftovers of \(model.orphanSelection.count == 1 ? "1 app" : "\(model.orphanSelection.count) apps") to the Trash?", isPresented: $confirming) {
             Button("Move to Trash", role: .destructive) { Task { await model.removeSelectedOrphans() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("\(Bytes.text(chosenBytes)). History can put them back until you empty the Trash.")
+            Text("\(Bytes.text(chosenBytes)).\(model.orphans.contains { $0.forAllUsers && model.orphanSelection.contains($0.id) } ? " Some are shared by every account, so macOS asks for an administrator password once." : "") History can put them back until you empty the Trash.")
         }
     }
 

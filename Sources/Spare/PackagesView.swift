@@ -88,18 +88,27 @@ final class PackagesModel: ObservableObject {
             found.append(.pipx)
             packages += PackageParsing.pipx(Data(Shell.run("pipx", ["list", "--json"], timeout: 60).output.utf8))
         }
+        packages += Toolchains.find(home: FileManager.default.homeDirectoryForCurrentUser)
+        packages += HandTools.find { path in
+            Shell.run("/usr/sbin/pkgutil", ["--file-info", path], timeout: 10).output
+                .split(separator: "\n").first { $0.hasPrefix("pkgid: ") }.map { String($0.dropFirst("pkgid: ".count)) }
+        }
         return (packages, found)
     }
 
-    /// Runs each package manager's own uninstall command. Package managers delete directly, so these can't be put
-    /// back from the Trash; the confirmation shows how to install them again.
+    /// Removes packages the way each is meant to go: the package manager's own uninstall command, a specific command
+    /// such as `rustup toolchain uninstall`, or moving a folder or file to the Trash (one password prompt for what only
+    /// an administrator may move). Package managers delete directly, so their packages can't be put back from the Trash.
     func uninstall(_ chosen: [PackageRow]) async {
-        guard !chosen.isEmpty, !working else { return }
+        let removable = chosen.map(\.package).filter { $0.origin.removable || $0.manager == .toolchain }
+        guard !removable.isEmpty, !working else { return }
         working = true
         defer { working = false }
-        let groups = Dictionary(grouping: chosen.map(\.package)) { "\($0.manager.rawValue)|\($0.isCask)" }
         var removed: [String] = []
         var problems: [String] = []
+
+        let managed = removable.filter { $0.removal == .manager }
+        let groups = Dictionary(grouping: managed) { "\($0.manager.rawValue)|\($0.isCask)" }
         for (_, packages) in groups.sorted(by: { $0.key < $1.key }) {
             guard let first = packages.first else { continue }
             let command = first.manager.uninstall + (first.isCask ? ["--cask"] : [])
@@ -114,10 +123,39 @@ final class PackagesModel: ObservableObject {
                 problems.append("\(first.manager.rawValue): " + (lines.isEmpty ? String(result.output.suffix(400)) : lines.prefix(4).joined(separator: " ")))
             }
         }
+
+        for package in removable {
+            guard case .command(let command) = package.removal else { continue }
+            let result = await background { Shell.run(command[0], Array(command.dropFirst()), timeout: 600) }
+            if result.succeeded { removed.append(package.name) } else { problems.append("\(package.name): " + String(result.output.suffix(300))) }
+        }
+
+        // Folders and files: your own go to the Trash directly; ones in shared places together after one password prompt.
+        let trashed = removable.filter { $0.removal == .trash && $0.location != nil }
+        let yours = trashed.filter { FileManager.default.isWritableFile(atPath: $0.location!.deletingLastPathComponent().path) }
+        if !yours.isEmpty {
+            let outcome = await Trasher.move(yours.map { ($0.location!, nil) }, title: yours.count == 1 ? "Removed \(yours[0].name)" : "Removed \(yours.count) tools")
+            let moved = Set(outcome.session?.records.map(\.original) ?? [])
+            removed += yours.filter { moved.contains($0.location!.path) }.map(\.name)
+            problems += outcome.failures.map { "\($0.url.lastPathComponent): \($0.reason)" }
+        }
+        let guarded = trashed.filter { !FileManager.default.isWritableFile(atPath: $0.location!.deletingLastPathComponent().path) }
+        if !guarded.isEmpty, let records = AdminTrash.move(guarded.map { $0.location! },
+                                                           prompt: "Spare wants to remove \(guarded.count == 1 ? guarded[0].name : "\(guarded.count) tools") installed for every account.") {
+            if !records.isEmpty {
+                HistoryModel.shared.add(TrashSession(title: guarded.count == 1 ? "Removed \(guarded[0].name)" : "Removed \(guarded.count) tools", records: records, bytes: 0))
+            }
+            let moved = Set(records.map(\.original))
+            removed += guarded.filter { moved.contains($0.location!.path) }.map(\.name)
+        }
+
         load()
         Shared.shared.refreshSpace()
-        Shared.shared.banner = .init(title: removed.isEmpty ? "Nothing was uninstalled" : "Uninstalled \(removed.count == 1 ? removed[0] : "\(removed.count) packages")",
-                                     detail: removed.isEmpty ? nil : "Package managers delete directly, so these aren't in the Trash.", problems: problems, failed: removed.isEmpty)
+        let inTrash = trashed.contains { removed.contains($0.name) }
+        Shared.shared.banner = .init(title: removed.isEmpty ? "Nothing was removed" : "Removed \(removed.count == 1 ? removed[0] : "\(removed.count) items")",
+                                     detail: removed.isEmpty ? nil : inTrash ? "Folders and files are in the Trash; History can put them back." : "Package managers delete directly, so these aren't in the Trash.",
+                                     session: inTrash ? HistoryModel.shared.sessions.first?.id : nil,
+                                     problems: problems, failed: removed.isEmpty)
     }
 
     func autoremove() async {
@@ -133,6 +171,8 @@ final class PackagesModel: ObservableObject {
 }
 
 struct PackagesView: View {
+    enum Part { case managers, toolchains, manual }
+    let part: Part
     @ObservedObject var model = PackagesModel.shared
     @State private var selection = Set<PackageRow.ID>()
     @State private var sortOrder = [KeyPathComparator(\PackageRow.name)]
@@ -142,25 +182,42 @@ struct PackagesView: View {
     @State private var confirming = false
     @State private var confirmingAutoremove = false
 
-    private var visible: [PackageRow] {
+    private var mine: [PackageRow] {
         model.rows.filter { row in
+            switch part {
+            case .managers: row.package.manager != .toolchain && row.package.manager != .manual
+            case .toolchains: row.package.manager == .toolchain
+            case .manual: row.package.manager == .manual
+            }
+        }
+    }
+
+    private var visible: [PackageRow] {
+        mine.filter { row in
             (manager == "All" || row.manager == manager)
                 && (!onlyRequested || row.package.requested)
                 && (search.isEmpty || row.name.localizedCaseInsensitiveContains(search) || (row.package.summary ?? "").localizedCaseInsensitiveContains(search))
         }.sorted(using: sortOrder)
     }
-    private var chosen: [PackageRow] { model.rows.filter { selection.contains($0.id) } }
+    private var chosen: [PackageRow] { mine.filter { selection.contains($0.id) } }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Picker("Manager", selection: $manager) {
-                    Text("All").tag("All")
-                    ForEach(model.managers, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
+                if part == .managers {
+                    Picker("Manager", selection: $manager) {
+                        Text("All").tag("All")
+                        ForEach(model.managers, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
+                    }
+                    .fixedSize()
+                    Toggle("Only what you installed", isOn: $onlyRequested).toggleStyle(.checkbox)
+                        .help("Hide packages that were installed only because another package needs them")
+                } else {
+                    Text(part == .toolchains
+                         ? "Language versions and SDKs: Rust toolchains, Node, Python and Ruby versions, Xcode's Command Line Tools."
+                         : "Commands in /usr/local that no package manager tracks: copied there by hand or by an app's installer.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
                 }
-                .fixedSize()
-                Toggle("Only what you installed", isOn: $onlyRequested).toggleStyle(.checkbox)
-                    .help("Hide packages that were installed only because another package needs them")
                 Spacer()
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -170,7 +227,7 @@ struct PackagesView: View {
                 .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
             }
             .padding(.horizontal, 18).padding(.vertical, 10)
-            if !model.unused.isEmpty {
+            if part == .managers && !model.unused.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "leaf").foregroundStyle(.green)
                     Text("\(model.unused.count == 1 ? "1 Homebrew formula was" : "\(model.unused.count) Homebrew formulae were") installed for packages that are gone, and nothing needs \(model.unused.count == 1 ? "it" : "them") now.")
@@ -190,26 +247,35 @@ struct PackagesView: View {
             Table(visible, selection: $selection, sortOrder: $sortOrder) {
                 TableColumn("Name", value: \.name) { row in
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(row.name).lineLimit(1)
-                        if let summary = row.package.summary, !summary.isEmpty {
+                        HStack(spacing: 5) { Text(row.name).lineLimit(1); OriginBadge(origin: row.package.origin) }
+                        if let note = row.package.note {
+                            Text(note).font(.system(size: 10.5)).foregroundStyle(row.package.kind == "Broken link" ? Color.orange : Color.secondary).lineLimit(1)
+                        } else if let summary = row.package.summary, !summary.isEmpty {
                             Text(summary).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                    .help(row.package.summary ?? row.name)
+                    .help([row.package.summary, row.package.note, row.package.location?.path].compactMap { $0 }.joined(separator: "\n"))
                 }
                 .width(min: 180, ideal: 260)
-                TableColumn("Manager", value: \.manager) { row in Text(row.package.isCask ? "Homebrew Cask" : row.manager) }.width(min: 70, ideal: 100)
-                TableColumn("Version", value: \.version).width(min: 60, ideal: 80)
-                TableColumn("Why It's Here", value: \.why) { row in
-                    Text(row.why).foregroundStyle(row.package.requested ? .primary : .secondary)
+                TableColumn(part == .managers ? "Manager" : "Kind", value: \.kind) { row in
+                    Text(part == .managers ? (row.package.isCask ? "Homebrew Cask" : row.manager) : row.kind)
                 }
-                .width(min: 110, ideal: 150)
+                .width(min: 70, ideal: 110)
+                TableColumn("Version", value: \.version).width(min: 60, ideal: 80)
+                TableColumn(part == .managers ? "Why It's Here" : "Where", value: \.why) { row in
+                    if part == .managers {
+                        Text(row.why).foregroundStyle(row.package.requested ? .primary : .secondary)
+                    } else {
+                        Text(row.package.location.map { Catalog.tilde($0, home: home) } ?? "—").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                .width(min: 110, ideal: 170)
                 TableColumn("Needed By", value: \.neededBy) { row in
                     Text(row.package.neededBy.isEmpty ? "—" : row.neededBy)
                         .foregroundStyle(row.package.neededBy.isEmpty ? .tertiary : .primary)
                         .lineLimit(1).help(row.neededBy)
                 }
-                .width(min: 120, ideal: 200)
+                .width(min: 90, ideal: 160)
                 TableColumn("Size", value: \.size) { row in SizeText(bytes: row.bytes) }.width(min: 60, ideal: 80)
             }
             .contextMenu(forSelectionType: PackageRow.ID.self) { ids in
@@ -225,16 +291,16 @@ struct PackagesView: View {
             }
             .overlay {
                 if model.loading && model.rows.isEmpty { ProgressView("Asking package managers…") }
-                else if !model.loading && model.managers.isEmpty {
-                    EmptyNote(symbol: "shippingbox", title: "No package managers found", text: "Spare looks for Homebrew, npm, pnpm, Bun, Cargo, uv and pipx.")
+                else if !model.loading && mine.isEmpty {
+                    EmptyNote(symbol: "shippingbox", title: "Nothing here", text: "Spare looks for Homebrew, npm, pnpm, Bun, Cargo, uv and pipx packages, language versions, and tools in /usr/local.")
                 }
             }
             HStack(spacing: 10) {
-                Text(chosen.isEmpty ? "\(visible.count) packages" : "\(chosen.count) selected · \(Bytes.text(chosen.compactMap(\.bytes).reduce(0, +)))")
+                Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected · \(Bytes.text(chosen.compactMap(\.bytes).reduce(0, +)))")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
                 Spacer()
                 if model.working { ProgressView().controlSize(.small) }
-                Button("Uninstall…", role: .destructive) { confirming = true }.disabled(chosen.isEmpty || model.working)
+                Button(part == .managers ? "Uninstall…" : "Remove…", role: .destructive) { confirming = true }.disabled(chosen.isEmpty || model.working)
             }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .background(.bar)
@@ -245,8 +311,8 @@ struct PackagesView: View {
                     .disabled(model.loading).help("Look Again")
             }
         }
-        .alert(chosen.count == 1 ? "Uninstall \(chosen[0].name)?" : "Uninstall \(chosen.count) packages?", isPresented: $confirming) {
-            Button("Uninstall", role: .destructive) { let rows = chosen; Task { await model.uninstall(rows) } }
+        .alert(chosen.count == 1 ? "Remove \(chosen[0].name)?" : "Remove \(chosen.count) items?", isPresented: $confirming) {
+            Button("Remove", role: .destructive) { let rows = chosen; Task { await model.uninstall(rows) } }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text(uninstallMessage)
@@ -255,6 +321,10 @@ struct PackagesView: View {
     }
 
     private var uninstallMessage: String {
+        if part != .managers {
+            let notes = chosen.compactMap(\.package.note).filter { !$0.hasPrefix("Installed by") }
+            return (["Folders and files go to the Trash, and History can put them back. Rust toolchains are removed with rustup."] + notes).joined(separator: "\n\n")
+        }
         let names = Set(chosen.map(\.name))
         let stillNeeded = chosen.filter { !$0.package.neededBy.allSatisfy(names.contains) }
         var text = "Each package manager removes its own packages directly; they don't go to the Trash. To get one back: \(chosen.prefix(3).map(\.package.reinstall).joined(separator: "; "))\(chosen.count > 3 ? "; …" : "")."

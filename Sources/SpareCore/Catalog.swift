@@ -338,6 +338,13 @@ public enum Catalog {
         }.sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
+    /// Every entry of a folder, symbolic links included, without .DS_Store.
+    public static func listIncludingLinks(_ folder: URL) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [])) ?? [])
+            .filter { $0.lastPathComponent != ".DS_Store" && $0.lastPathComponent != ".localized" }
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+    }
+
     static func children(of folder: URL, except: Set<String> = [], cancel: Cancellation,
                          describe: (URL) -> (String, String?)) -> [Item] {
         let entries = list(folder).filter { !except.contains($0.lastPathComponent) }

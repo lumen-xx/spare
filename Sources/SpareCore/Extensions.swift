@@ -17,6 +17,7 @@ public struct Extension: Identifiable, Sendable, Hashable {
         case services = "Services and Workflows"
         case internet = "Internet Plug-ins"
         case colorPickers = "Color Pickers"
+        case searchPaths = "Search Paths"
         case receipts = "Installer Packages"
 
         public var symbol: String {
@@ -35,6 +36,7 @@ public struct Extension: Identifiable, Sendable, Hashable {
             case .services: "gearshape.2"
             case .internet: "globe"
             case .colorPickers: "eyedropper"
+            case .searchPaths: "terminal"
             case .receipts: "shippingbox"
             }
         }
@@ -55,6 +57,7 @@ public struct Extension: Identifiable, Sendable, Hashable {
             case .services: "Quick Actions and Automator workflows in the Services menu."
             case .internet: "Browser plug-ins from before browsers stopped using them."
             case .colorPickers: "Extra panels for the system colour picker."
+            case .searchPaths: "Folders installers added to where Terminal looks for commands. An entry pointing to a folder that's gone was left behind."
             case .receipts: "Installers that put files around the system. Spare lists them so you know what was installed; the files are listed in the other groups."
             }
         }
@@ -77,6 +80,7 @@ public struct Extension: Identifiable, Sendable, Hashable {
             case .services: ["~/Library/Services"]
             case .internet: ["~/Library/Internet Plug-Ins", "/Library/Internet Plug-Ins"]
             case .colorPickers: ["~/Library/ColorPickers", "/Library/ColorPickers"]
+            case .searchPaths: ["/etc/paths.d", "/etc/manpaths.d"]
             }
         }
     }
@@ -133,11 +137,28 @@ public enum Extensions {
             let version = Bundle(url: entry)?.infoDictionary?["CFBundleShortVersionString"] as? String
             let kind = folderKinds[entry.pathExtension.lowercased()]
             let detail = [kind, version.map { "Version " + $0 }].compactMap { $0 }.joined(separator: " · ")
-            let item = Extension(category: category, name: entry.deletingPathExtension().lastPathComponent, url: entry,
+            let name = category == .searchPaths ? entry.lastPathComponent : entry.deletingPathExtension().lastPathComponent
+            var item = Extension(category: category, name: name, url: entry,
                                  detail: detail.isEmpty ? nil : detail, origin: origin, forAllUsers: allUsers, bytes: DiskUsage.measure(entry).bytes)
+            if category == .searchPaths { searchPath(&item, entry) }
             lock.lock(); found[index] = item; lock.unlock()
         }
         return found.compactMap { $0 }
+    }
+
+    /// macOS's own search path files, which no installer receipt records.
+    static let systemSearchPaths: Set<String> = ["10-cryptex", "10-pmk-global", "100-rvictl", "40-XQuartz"]
+
+    /// Shows which folders a search path file adds, and whether they still exist.
+    static func searchPath(_ item: inout Extension, _ file: URL) {
+        let folders = ((try? String(contentsOf: file, encoding: .utf8)) ?? "").split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        item.detail = folders.joined(separator: ", ")
+        if systemSearchPaths.contains(file.lastPathComponent) || folders.allSatisfy({ $0.hasPrefix("/Library/Apple") || $0.hasPrefix("/var/run/com.apple") || $0.hasPrefix("/System") }) {
+            item.origin = .macOS
+            return
+        }
+        let missing = folders.filter { !FileManager.default.fileExists(atPath: $0) }
+        if !missing.isEmpty { item.note = "Points to \(missing.joined(separator: ", ")), which is gone." }
     }
 
     /// Entries that are part of the folder structure rather than something installed.
@@ -217,6 +238,14 @@ public enum Snapshots {
             let snapshot = LocalSnapshot(name: name, date: nil, dataless: trimmed.contains("(dataless)"))
             return LocalSnapshot(name: name, date: snapshot.stamp.flatMap { formatter.date(from: $0) }, dataless: snapshot.dataless)
         }
+    }
+}
+
+/// Lets the checks look at one search path file.
+public enum ExtensionsChecks {
+    public static func searchPath(_ item: inout Extension) {
+        guard let url = item.url else { return }
+        Extensions.searchPath(&item, url)
     }
 }
 

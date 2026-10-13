@@ -19,15 +19,17 @@ Spare is not notarized yet. Only run this for Spare downloaded here.
 
 ## Use
 
-- **Cleanup**: Xcode build data, node_modules and other build folders in projects you haven't touched for a month, package manager caches, app caches, logs and crash reports. Only things that come back by themselves are selected.
-- **Your Call**: old downloads, iPhone backups, Xcode archives and AI models. Listed, never selected for you.
-- **Space**: which folders take the most room, as deep as you like.
-- **Apps**: uninstall an app together with the files it keeps in your Library, and find leftovers of apps you already removed.
-- **Packages**: Homebrew, npm, pnpm, Bun, Cargo, uv and pipx packages, with what needs what. Uninstall several at once.
-- **Login Items** and **Background Items**: everything that starts on its own. Select several, then turn them off, on, or remove them.
-- **Drivers & Extensions**: system extensions, drivers, audio plug-ins, fonts, input methods and more. macOS's own are marked and locked.
-- **System Data**: Time Machine snapshots on this disk, and what macOS downloaded for Apple Intelligence, dictation and voices.
+Every topic has its own page in the sidebar:
+
+- **Free Up Space**: Cleanup (caches, build folders, logs, with plain explanations), Space, Time Machine Snapshots, and what macOS downloaded for Apple Intelligence, dictation and voices.
+- **Apps & Software**: Apps with their files, Leftovers of removed apps (yours and system-wide), Packages (Homebrew, npm, pnpm, Bun, Cargo, uv, pipx), Toolchains (Rust, Node, Python versions, Xcode's tools), and Command-Line Tools in /usr/local.
+- **Startup**: Login Items and Background Items. Select several, then turn them off, on, or remove them.
+- **System Additions**: System Extensions, Drivers, Plug-ins, Fonts, Input Methods, Installer Packages and Search Paths.
+- **System Changes**: hidden Accounts installers created, Printers, VPN, Profiles and Privacy permissions given to apps.
+- **Home Folder**: hidden items in your home folder, named by their owner, and the Shared folder.
 - **History**: everything Spare moved to the Trash, with Put Back.
+
+Everything that is part of macOS is marked and locked. Nothing a running app has open is moved.
 
 Spare never deletes anything itself, has no background process or menu bar icon, and never sends anything anywhere.
 

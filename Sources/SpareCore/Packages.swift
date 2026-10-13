@@ -5,6 +5,10 @@ import Foundation
 public struct Package: Identifiable, Sendable, Hashable {
     public enum Manager: String, CaseIterable, Sendable {
         case homebrew = "Homebrew", npm = "npm", pnpm = "pnpm", bun = "Bun", cargo = "Cargo", uv = "uv", pipx = "pipx"
+        /// Language versions and SDKs: Rust toolchains, Node and Python versions, Xcode's Command Line Tools.
+        case toolchain = "Toolchain"
+        /// Command-line tools copied into /usr/local by hand or by an installer script.
+        case manual = "By hand"
 
         /// The command that removes packages, before their names.
         public var uninstall: [String] {
@@ -16,6 +20,7 @@ public struct Package: Identifiable, Sendable, Hashable {
             case .cargo: ["cargo", "uninstall"]
             case .uv: ["uv", "tool", "uninstall"]
             case .pipx: ["pipx", "uninstall"]
+            case .toolchain, .manual: []
             }
         }
 
@@ -28,14 +33,26 @@ public struct Package: Identifiable, Sendable, Hashable {
             case .cargo: "cargo install"
             case .uv: "uv tool install"
             case .pipx: "pipx install"
+            case .toolchain: "its version manager"
+            case .manual: "the tool's own installer"
             }
         }
+    }
+
+    /// How it is removed.
+    public enum Removal: Sendable, Hashable {
+        /// With the package manager's own uninstall command.
+        case manager
+        /// With a specific command, such as `rustup toolchain uninstall stable`.
+        case command([String])
+        /// By moving its folder or file to the Trash.
+        case trash
     }
 
     public let manager: Manager
     public let name: String
     /// "Formula", "App (cask)", "Global package" or "Tool".
-    public let kind: String
+    public var kind: String
     public let version: String
     public var summary: String?
     /// Installed packages it needs.
@@ -45,7 +62,11 @@ public struct Package: Identifiable, Sendable, Hashable {
     /// Installed because someone asked for it, not only to satisfy another package.
     public var requested = true
     public var location: URL?
-    public var id: String { manager.rawValue + "/" + kind + "/" + name }
+    public var removal = Removal.manager
+    public var origin = Origin.thirdParty
+    /// Something worth knowing before removing it.
+    public var note: String?
+    public var id: String { manager.rawValue + "/" + kind + "/" + name + (location?.path ?? "") }
     public var isCask: Bool { kind == "App (cask)" }
 
     public init(manager: Manager, name: String, kind: String, version: String, summary: String? = nil, location: URL? = nil) {
@@ -53,7 +74,125 @@ public struct Package: Identifiable, Sendable, Hashable {
     }
 
     /// The command that installs it again.
-    public var reinstall: String { manager.install + (isCask ? " --cask " : " ") + name }
+    public var reinstall: String {
+        switch manager {
+        case .toolchain, .manual: "Install it again with \(manager.install)"
+        default: manager.install + (isCask ? " --cask " : " ") + name
+        }
+    }
+}
+
+/// Language versions and SDKs installed outside a package manager's package list.
+public enum Toolchains {
+    public static func find(home: URL) -> [Package] {
+        var found: [Package] = []
+        func versions(_ relative: String, _ language: String, via: String, skip: Set<String> = []) {
+            for url in Catalog.list(home.appendingPathComponent(relative))
+            where !skip.contains(url.lastPathComponent) && !url.lastPathComponent.hasPrefix(".")
+                && (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                var package = Package(manager: .toolchain, name: "\(language) \(url.lastPathComponent)", kind: "\(language) (\(via))",
+                                      version: url.lastPathComponent, summary: "A \(language) version installed with \(via).", location: url)
+                package.removal = .trash
+                found.append(package)
+            }
+        }
+        // Rust: each toolchain through rustup, and rustup itself.
+        for url in Catalog.list(home.appendingPathComponent(".rustup/toolchains")) {
+            var package = Package(manager: .toolchain, name: "Rust " + url.lastPathComponent, kind: "Rust (rustup)",
+                                  version: url.lastPathComponent.components(separatedBy: "-").first ?? "", summary: "A Rust compiler and its standard library.", location: url)
+            package.removal = .command(["rustup", "toolchain", "uninstall", url.lastPathComponent])
+            found.append(package)
+        }
+        if FileManager.default.fileExists(atPath: home.appendingPathComponent(".rustup").path) {
+            var rustup = Package(manager: .toolchain, name: "rustup", kind: "Rust (rustup)", version: "",
+                                 summary: "Rust's installer, with every toolchain and Cargo's tools in ~/.cargo.", location: home.appendingPathComponent(".rustup"))
+            rustup.removal = .command(["rustup", "self", "uninstall", "-y"])
+            rustup.note = "Removes every Rust toolchain and the tools Cargo installed."
+            found.append(rustup)
+        }
+        versions(".nvm/versions/node", "Node", via: "nvm")
+        versions(".local/share/fnm/node-versions", "Node", via: "fnm")
+        versions("Library/Application Support/fnm/node-versions", "Node", via: "fnm")
+        versions(".volta/tools/image/node", "Node", via: "Volta")
+        versions(".pyenv/versions", "Python", via: "pyenv")
+        versions(".local/share/uv/python", "Python", via: "uv")
+        versions(".rbenv/versions", "Ruby", via: "rbenv")
+        versions("sdk", "Go", via: "go")
+        for tool in Catalog.list(home.appendingPathComponent(".sdkman/candidates")) {
+            versions(".sdkman/candidates/\(tool.lastPathComponent)", tool.lastPathComponent.capitalized, via: "SDKMAN", skip: ["current"])
+        }
+        for (relative, name) in [("miniconda3", "Miniconda"), ("anaconda3", "Anaconda"), ("miniforge3", "Miniforge"), ("opt/miniconda3", "Miniconda"),
+                                 ("opt/anaconda3", "Anaconda"), ("Library/Android/sdk", "Android SDK"), ("flutter", "Flutter SDK"),
+                                 ("development/flutter", "Flutter SDK"), (".dotnet", ".NET SDK")] {
+            let url = home.appendingPathComponent(relative)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            var package = Package(manager: .toolchain, name: name, kind: "SDK", version: "", summary: "Installed in ~/\(relative).", location: url)
+            package.removal = .trash
+            if name.contains("conda") { package.note = "Your shell's settings may still set it up; remove its lines from ~/.zshrc." }
+            found.append(package)
+        }
+        let tools = URL(fileURLWithPath: "/Library/Developer/CommandLineTools")
+        if FileManager.default.fileExists(atPath: tools.path) {
+            var package = Package(manager: .toolchain, name: "Command Line Tools for Xcode", kind: "Apple developer tools", version: "",
+                                  summary: "Apple's compilers, git and make.", location: tools)
+            package.removal = .trash
+            package.origin = .apple
+            package.note = "git, make and Homebrew need these. Get them back with: xcode-select --install"
+            found.append(package)
+        }
+        let go = URL(fileURLWithPath: "/usr/local/go")
+        if FileManager.default.fileExists(atPath: go.path) {
+            var package = Package(manager: .toolchain, name: "Go", kind: "SDK", version: "", summary: "Installed in /usr/local/go.", location: go)
+            package.removal = .trash
+            found.append(package)
+        }
+        return found
+    }
+}
+
+/// Command-line tools in /usr/local that no package manager tracks: copied by hand, or by an app's own installer.
+public enum HandTools {
+    public static func find(folders: [String] = ["/usr/local/bin", "/usr/local/sbin", "/usr/local/libexec"],
+                            packageOf: (String) -> String?) -> [Package] {
+        var found: [Package] = []
+        for folder in folders {
+            for url in Catalog.listIncludingLinks(URL(fileURLWithPath: folder)) {
+                let path = url.path
+                var package = Package(manager: .manual, name: url.lastPathComponent, kind: "Tool", version: "", location: url)
+                package.removal = .trash
+                if let target = try? FileManager.default.destinationOfSymbolicLink(atPath: path) {
+                    let absolute = target.hasPrefix("/") ? target : url.deletingLastPathComponent().appendingPathComponent(target).standardizedFileURL.path
+                    // Homebrew links its own tools here on Intel Macs; those belong on the Packages page.
+                    if absolute.contains("/Cellar/") || absolute.contains("/Caskroom/") || absolute.contains("/Homebrew/") { continue }
+                    if !FileManager.default.fileExists(atPath: absolute) {
+                        package.kind = "Broken link"
+                        package.summary = "Points to \(absolute), which is gone."
+                        if let app = absolute.range(of: ".app/").map({ URL(fileURLWithPath: String(absolute[..<$0.lowerBound]) + ".app").deletingPathExtension().lastPathComponent }) {
+                            package.note = "Left by \(app), which is no longer here."
+                        }
+                    } else if let range = absolute.range(of: ".app/") {
+                        let app = URL(fileURLWithPath: String(absolute[..<range.lowerBound]) + ".app").deletingPathExtension().lastPathComponent
+                        package.summary = "A link into \(app)."
+                    } else {
+                        package.summary = "A link to \(absolute)."
+                    }
+                } else if url.pathExtension == "xpc" || url.pathExtension == "app" {
+                    package.kind = "Helper"
+                    package.summary = "A helper program an installer put here."
+                } else if let head = try? FileHandle(forReadingFrom: url).readData(ofLength: 400),
+                          String(decoding: head, as: UTF8.self).hasPrefix("#!"), String(decoding: head, as: UTF8.self).contains("xcrun") {
+                    package.origin = .apple
+                    package.summary = "Runs Apple's \(url.lastPathComponent) through Xcode's tools."
+                }
+                if let receipt = packageOf(path) {
+                    package.note = "Installed by the package \(receipt)."
+                    if receipt.hasPrefix("com.apple.") { package.origin = .apple }
+                }
+                found.append(package)
+            }
+        }
+        return found
+    }
 }
 
 public enum PackageParsing {

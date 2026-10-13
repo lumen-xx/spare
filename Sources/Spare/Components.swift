@@ -210,3 +210,6 @@ struct EmptyNote: View {
 extension Date {
     var ago: String { Catalog.ago(self, from: Date()) }
 }
+
+/// "1 item", "3 items".
+func countText(_ count: Int, _ noun: String) -> String { count == 1 ? "1 \(noun)" : "\(count) \(noun)s" }

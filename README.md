@@ -4,20 +4,36 @@ An honest Mac cleaner for Apple silicon, macOS 14 or newer. It shows what takes 
 
 ## What it does
 
-- **Cleanup**: Xcode build data and device support files; node_modules, Rust targets, Swift .build folders and other build folders beside their project file; package manager caches (npm, pnpm, Yarn, Bun, Homebrew, pip, uv, CocoaPods, SwiftPM, Gradle, Maven, Cargo, Go, Composer, Deno, Playwright and more); app caches except macOS's own; logs; crash reports. Things that come back by themselves are selected. Caches of open apps and projects touched within a month are not.
-- **Your Call**: old installers and large unopened files in Downloads, iPhone and iPad backups, Xcode archives, downloaded AI models. Listed, never selected.
-- **Space**: folder sizes from your home folder down, measured in parallel; any folder can be opened.
-- **Apps**: size of each app plus the files it keeps in ~/Library, matched by bundle identifier or exact name only. Uninstalling quits the app, stops its login agents and moves everything to the Trash. Leftovers lists files named after bundle identifiers that no installed app, running process or background job uses.
-- **Packages**: Homebrew formulae and casks with what needs what, and global npm, pnpm, Bun, Cargo, uv and pipx packages. Uninstalling runs each manager's own command; Homebrew's unused formulae can be removed with `brew autoremove`.
-- **Login Items** and **Background Items**: tables with multiple selection. Launchd jobs in ~/Library/LaunchAgents, /Library/LaunchAgents and /Library/LaunchDaemons can be turned off (`launchctl disable` + `bootout`), on again, or removed; items apps register with macOS (read from `sfltool dumpbtm`, the list System Settings shows) link to Login Items settings. Helper tools nothing starts are flagged. One administrator prompt covers every system item selected.
-- **Drivers & Extensions**: system extensions (`systemextensionsctl`), kernel extensions, audio drivers and plug-ins, camera and printer drivers, input methods, Quick Look and Spotlight plug-ins, settings panes, screen savers, fonts, services, colour pickers and installer packages. Origin comes from installer receipts (`pkgutil --file-info`) and Apple's code signature: macOS's own is locked, Apple's optional additions are labelled.
-- **System Data**: Time Machine local snapshots (deleted with `tmutil deletelocalsnapshots` after a password prompt) and /System/Library/AssetsV2 grouped by feature (Apple Intelligence, dictation, voices, updates). System Integrity Protection guards those, so Spare links to the setting that lets macOS remove them.
-- **History**: every move, with Put Back, until the Trash is emptied.
-- **Settings**: project folders, Full Disk Access and updates, as the last page of the window.
+Every topic has its own page in the sidebar.
+
+**Free Up Space**
+- **Cleanup**: Xcode build data and device support files; node_modules, Rust targets, Swift .build folders and other build folders beside their project file; package manager caches; app caches except macOS's own; logs; crash reports. Things that come back by themselves are selected; caches of open apps, projects touched within a month and anything a running program has open are not. **Your Call** lists old downloads, device backups, Xcode archives and AI models, never selected.
+- **Space**: folder sizes from your home folder down.
+- **Snapshots**: Time Machine's local snapshots, deleted with `tmutil deletelocalsnapshots` after a password prompt. APFS reports no size per snapshot; emptied ones show zero and the purgeable total is shown.
+- **macOS Downloads**: /System/Library/AssetsV2 grouped by feature (Apple Intelligence, dictation, voices, updates). System Integrity Protection guards these; Spare links to the setting that lets macOS remove them.
+
+**Apps & Software**
+- **Apps**: each app with the files it keeps in ~/Library, matched by bundle identifier or exact name; uninstalling quits it, stops its login agents and moves everything to the Trash.
+- **Leftovers**: files in ~/Library and /Library named after software no installed app, process or background job uses; folders of shortcuts to removed apps in /Applications. In /Library, nothing of macOS's and nothing of a company whose software is still installed is listed.
+- **Packages**: Homebrew formulae and casks with what needs what, and global npm, pnpm, Bun, Cargo, uv and pipx packages, removed with each manager's own command.
+- **Toolchains**: Rust toolchains and rustup (removed with rustup), Node, Python and Ruby versions, conda, SDKs and Xcode's Command Line Tools.
+- **Command-Line Tools**: commands in /usr/local no package manager tracks, with broken links of removed apps and Apple's own shims marked.
+
+**Startup**
+- **Login Items** and **Background Items**: tables with multiple selection. Launchd jobs can be turned off (`launchctl disable` + `bootout`), on, or removed; items apps register with macOS (from `sfltool dumpbtm`) link to Login Items settings; helper tools nothing starts are flagged.
+
+**System Additions**: System Extensions (removed only with their app, so each says how), Drivers, Plug-ins, Fonts, Input Methods, Installer Packages (what a receipt still has on disk goes to the Trash and macOS forgets the receipt) and Search Paths (/etc/paths.d). Origin comes from installer receipts and Apple's code signature: macOS's own is locked, Apple's optional additions are labelled.
+
+**System Changes**: hidden Accounts installers created (`dscl . -delete`), added Printers (`lpadmin -x`), VPN configurations and configuration Profiles (changed in Settings), and Privacy permissions given to apps (reset with `tccutil`; needs Full Disk Access to read).
+
+**Home Folder**: Hidden Items in your home folder named by their owner, with keys marked and leftovers of removed tools flagged; the Shared Folder.
+
+**History** lists every move, with Put Back, until the Trash is emptied. **Settings** holds project folders, Full Disk Access and updates.
 
 ## Honesty rules
 
-- Nothing is deleted by Spare. Items go to the Trash; History records where each came from. Package managers delete their own packages, and Spare says so before they run.
+- Nothing is deleted by Spare except when you empty the Trash. Items go to the Trash; History records where each came from. Package managers delete their own packages, and accounts, printers and privacy decisions aren't files; Spare says so before any of these run.
+- Everything that needs an administrator in one action goes in one request, through one script per session, so macOS's five-minute grace period applies.
 - Nothing a running program has open is offered or moved (open files are read through libproc, as lsof does), so the Trash never ends up holding files an app still writes to.
 - Sizes are allocated blocks on disk. A file hard-linked from elsewhere (for example a pnpm store) is shown as shared and not counted as freed. APFS clones can't be told apart, so a cloned file counts in full.
 - macOS's own caches, documents, photos, mail and messages are never offered.

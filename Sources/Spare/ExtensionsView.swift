@@ -146,6 +146,7 @@ final class ExtensionsModel: ObservableObject {
 }
 
 struct ExtensionsView: View {
+    let page: Page
     @ObservedObject var model = ExtensionsModel.shared
     @State private var selection = Set<ExtensionRow.ID>()
     @State private var sortOrder = [KeyPathComparator(\ExtensionRow.category), KeyPathComparator(\ExtensionRow.name)]
@@ -153,33 +154,36 @@ struct ExtensionsView: View {
     @State private var hideMacOS = false
     @State private var confirming = false
 
+    private var mine: [ExtensionRow] { model.rows.filter { page.extensionCategories.contains($0.item.category) } }
     private var visible: [ExtensionRow] {
-        model.rows.filter { row in
+        mine.filter { row in
             (category == "All" || row.category == category) && (!hideMacOS || row.item.origin != .macOS)
         }.sorted(using: sortOrder)
     }
-    private var chosen: [ExtensionRow] { model.rows.filter { selection.contains($0.id) } }
-    private var categories: [Extension.Category] { Extension.Category.allCases.filter { kind in model.rows.contains { $0.item.category == kind } } }
+    private var chosen: [ExtensionRow] { mine.filter { selection.contains($0.id) } }
+    private var categories: [Extension.Category] { page.extensionCategories.filter { kind in model.rows.contains { $0.item.category == kind } } }
 
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Picker("Show", selection: $category) {
-                    Text("Everything (\(model.rows.count))").tag("All")
-                    Divider()
-                    ForEach(categories, id: \.self) { kind in
-                        Text("\(kind.rawValue) (\(model.rows.filter { $0.item.category == kind }.count))").tag(kind.rawValue)
+                if page.extensionCategories.count > 1 {
+                    Picker("Show", selection: $category) {
+                        Text("All (\(mine.count))").tag("All")
+                        Divider()
+                        ForEach(categories, id: \.self) { kind in
+                            Text("\(kind.rawValue) (\(mine.filter { $0.item.category == kind }.count))").tag(kind.rawValue)
+                        }
                     }
+                    .fixedSize()
                 }
-                .fixedSize()
-                Toggle("Hide macOS's own", isOn: $hideMacOS).toggleStyle(.checkbox)
+                Text((Extension.Category(rawValue: category) ?? (page.extensionCategories.count == 1 ? page.extensionCategories.first : nil))?.explanation ?? pageExplanation)
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
+                if mine.contains(where: { $0.item.origin == .macOS }) {
+                    Toggle("Hide macOS's own", isOn: $hideMacOS).toggleStyle(.checkbox).fixedSize()
+                }
             }
-            .padding(.horizontal, 18).padding(.top, 10).padding(.bottom, 6)
-            if let kind = Extension.Category(rawValue: category) {
-                Text(kind.explanation).font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 18).padding(.bottom, 8)
-            }
+            .padding(.horizontal, 18).padding(.vertical, 10)
             Table(visible, selection: $selection, sortOrder: $sortOrder) {
                 TableColumn("Name", value: \.name) { row in
                     HStack(spacing: 8) {
@@ -227,7 +231,10 @@ struct ExtensionsView: View {
             } primaryAction: { ids in
                 NSWorkspace.shared.activateFileViewerSelecting(model.rows.filter { ids.contains($0.id) }.compactMap(\.item.url))
             }
-            .overlay { if model.loading && model.rows.isEmpty { ProgressView("Looking through drivers and plug-ins…") } }
+            .overlay {
+                if model.loading && model.rows.isEmpty { ProgressView("Looking…") }
+                else if !model.loading && mine.isEmpty { EmptyNote(symbol: page.symbol, title: "Nothing here", text: "Nothing of this kind has been added to this Mac.") }
+            }
             actionBar
         }
         .toolbar {
@@ -246,10 +253,17 @@ struct ExtensionsView: View {
         .onAppear { model.startIfNeeded() }
     }
 
+    private var pageExplanation: String {
+        switch page {
+        case .drivers: "Drivers for audio, cameras, printers and other hardware, including older kernel extensions."
+        case .plugIns: "Plug-ins for music apps, Quick Look, Spotlight, System Settings, screen savers, the Services menu and the colour picker."
+        default: ""
+        }
+    }
+
     /// Opens the app in Apps, where uninstalling shows everything that goes with it.
     static func uninstall(app url: URL) {
         Navigation.shared.page = .apps
-        UserDefaults.standard.set(AppsView.Mode.installed.rawValue, forKey: "appsMode")
         AppsModel.shared.startIfNeeded()
         AppsModel.shared.selection = url.path
     }
@@ -277,7 +291,7 @@ struct ExtensionsView: View {
     private var actionBar: some View {
         let removable = chosen.filter(\.item.removable)
         return HStack(spacing: 10) {
-            Text(chosen.isEmpty ? "\(visible.count) items" : "\(chosen.count) selected" + (removable.count < chosen.count ? " · \(chosen.count - removable.count) \(chosen.contains { $0.item.category == .system } ? "removed only with their app" : "part of macOS")" : ""))
+            Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected" + (removable.count < chosen.count ? " · \(chosen.count - removable.count) \(chosen.contains { $0.item.category == .system } ? "removed only with their app" : "part of macOS")" : ""))
                 .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
             if model.working { ProgressView().controlSize(.small) }

@@ -71,26 +71,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum Page: String, CaseIterable, Identifiable {
-    case cleanup = "Cleanup", space = "Space", systemData = "System Data"
-    case apps = "Apps", packages = "Packages", loginItems = "Login Items", background = "Background Items", extensions = "Drivers & Extensions"
+    case cleanup = "Cleanup", space = "Space", snapshots = "Snapshots", macOSDownloads = "macOS Downloads"
+    case apps = "Apps", leftovers = "Leftovers", packages = "Packages", toolchains = "Toolchains", commandLineTools = "Command-Line Tools"
+    case loginItems = "Login Items", background = "Background Items"
+    case systemExtensions = "System Extensions", drivers = "Drivers", plugIns = "Plug-ins", fonts = "Fonts", inputMethods = "Input Methods"
+    case installerPackages = "Installer Packages", searchPaths = "Search Paths"
+    case accounts = "Accounts", printers = "Printers", vpn = "VPN", profiles = "Profiles", privacy = "Privacy"
+    case hiddenItems = "Hidden Items", sharedFolder = "Shared Folder"
     case history = "History", settings = "Settings"
+
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .cleanup: "sparkles"
         case .space: "chart.bar.doc.horizontal"
-        case .systemData: "internaldrive"
+        case .snapshots: "clock.badge.checkmark"
+        case .macOSDownloads: "arrow.down.app"
         case .apps: "app.dashed"
+        case .leftovers: "tray.full"
         case .packages: "shippingbox"
+        case .toolchains: "hammer"
+        case .commandLineTools: "terminal"
         case .loginItems: "power"
         case .background: "gearshape.2"
-        case .extensions: "puzzlepiece.extension"
+        case .systemExtensions: "puzzlepiece.extension"
+        case .drivers: "cpu"
+        case .plugIns: "powerplug"
+        case .fonts: "textformat"
+        case .inputMethods: "keyboard"
+        case .installerPackages: "archivebox"
+        case .searchPaths: "point.topleft.down.to.point.bottomright.curvepath"
+        case .accounts: "person.2"
+        case .printers: "printer"
+        case .vpn: "network.badge.shield.half.filled"
+        case .profiles: "checkmark.shield"
+        case .privacy: "hand.raised"
+        case .hiddenItems: "eye.slash"
+        case .sharedFolder: "folder.badge.person.crop"
         case .history: "clock.arrow.circlepath"
         case .settings: "gearshape"
         }
     }
-    static let freeUpSpace: [Page] = [.cleanup, .space, .systemData]
-    static let installed: [Page] = [.apps, .packages, .loginItems, .background, .extensions]
+
+    static let sections: [(String, [Page])] = [
+        ("Free Up Space", [.cleanup, .space, .snapshots, .macOSDownloads]),
+        ("Apps & Software", [.apps, .leftovers, .packages, .toolchains, .commandLineTools]),
+        ("Startup", [.loginItems, .background]),
+        ("System Additions", [.systemExtensions, .drivers, .plugIns, .fonts, .inputMethods, .installerPackages, .searchPaths]),
+        ("System Changes", [.accounts, .printers, .vpn, .profiles, .privacy]),
+        ("Home Folder", [.hiddenItems, .sharedFolder])
+    ]
+
+    /// Kinds of drivers and extensions each System Additions page shows.
+    var extensionCategories: [Extension.Category] {
+        switch self {
+        case .systemExtensions: [.system]
+        case .drivers: [.kernel, .audioDrivers, .camera, .printers]
+        case .plugIns: [.audioPlugIns, .quickLook, .internet, .panes, .screenSavers, .services, .colorPickers]
+        case .fonts: [.fonts]
+        case .inputMethods: [.input]
+        case .installerPackages: [.receipts]
+        case .searchPaths: [.searchPaths]
+        default: []
+        }
+    }
 }
 
 /// Which page is showing, shared so menu commands such as Settings… can switch it.
@@ -112,23 +156,41 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: Binding(get: { navigation.page }, set: { if let value = $0 { navigation.page = value } })) {
-                Section("Free Up Space") { ForEach(Page.freeUpSpace) { row($0) } }
-                Section("Installed") { ForEach(Page.installed) { row($0) } }
+                ForEach(Page.sections, id: \.0) { title, pages in
+                    Section(title) { ForEach(pages) { row($0) } }
+                }
                 Section { row(.history); row(.settings) }
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 290)
-            .safeAreaInset(edge: .bottom) { DiskSummary().padding(14) }
+            // With many pages the list scrolls; the disk summary keeps its own backing so rows don't show through it.
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                DiskSummary().padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.bar)
+                    .overlay(alignment: .top) { Divider() }
+            }
         } detail: {
             Group {
                 switch navigation.page {
                 case .cleanup: CleanupView()
                 case .space: SpaceView()
-                case .systemData: SystemDataView()
+                case .snapshots: SystemDataView(part: .snapshots)
+                case .macOSDownloads: SystemDataView(part: .downloads)
                 case .apps: AppsView()
-                case .packages: PackagesView()
+                case .leftovers: LeftoversView()
+                case .packages: PackagesView(part: .managers)
+                case .toolchains: PackagesView(part: .toolchains)
+                case .commandLineTools: PackagesView(part: .manual)
                 case .loginItems: StartupView(part: .login)
                 case .background: StartupView(part: .background)
-                case .extensions: ExtensionsView()
+                case .systemExtensions, .drivers, .plugIns, .fonts, .inputMethods, .installerPackages, .searchPaths:
+                    ExtensionsView(page: navigation.page).id(navigation.page)
+                case .accounts: ChangesView(kind: .account).id(navigation.page)
+                case .printers: ChangesView(kind: .printer).id(navigation.page)
+                case .vpn: ChangesView(kind: .vpn).id(navigation.page)
+                case .profiles: ChangesView(kind: .profile).id(navigation.page)
+                case .privacy: ChangesView(kind: .privacy).id(navigation.page)
+                case .hiddenItems: HomeView(place: .home).id(navigation.page)
+                case .sharedFolder: HomeView(place: .shared).id(navigation.page)
                 case .history: HistoryView()
                 case .settings: SettingsView()
                 }
@@ -217,6 +279,32 @@ enum Report {
             print("    \(item.name) [\(item.state ?? "")]: \(item.note ?? "")")
             for part in item.parts { print("      would move \(part.path)") }
         }
+        lap("Toolchains and hand-installed tools")
+        for package in packages where package.manager == .toolchain || package.manager == .manual {
+            print("  [\(package.manager.rawValue)] \(package.name) — \(package.kind)\(package.origin == .thirdParty ? "" : " [\(package.origin.label)]") \(package.summary ?? "") \(package.note ?? "")")
+        }
+        lap("Search paths")
+        for item in extensions where item.category == .searchPaths {
+            print("  \(item.name) [\(item.origin.label)] \(item.detail ?? "") \(item.note ?? "")")
+        }
+        lap("Leftovers for every account")
+        let apps = Apps.installed(home: home)
+        let running = NSWorkspace.shared.runningApplications
+        for orphan in AppsModel.collectOrphans(installed: Set(apps.map(\.bundleID)), names: apps.map(\.name), running: Set(running.compactMap(\.bundleIdentifier)),
+                                               runningNames: running.compactMap(\.localizedName), fullDiskAccess: Permissions.fullDiskAccess()) where orphan.forAllUsers {
+            print("  \(orphan.bundleID): \(Bytes.text(orphan.bytes)) — \(orphan.leftovers.map { $0.url.path }.joined(separator: ", "))")
+        }
+        lap("System changes")
+        for change in SystemChangesModel.collect(fullDiskAccess: Permissions.fullDiskAccess()) {
+            print("  [\(change.kind.rawValue)] \(change.name) — \(change.detail ?? "") · \(change.state ?? "") · \(change.removable ? "removable" : "settings")\(change.ownerGone ? " · app gone" : "")")
+        }
+        lap("Home folder")
+        let items = HomeItems.hidden(home: home, appInstalled: { AppLookup.url(for: $0) != nil }, toolFound: { Shell.which($0) != nil },
+                                     appNamed: HomeModel.appNamed()) + HomeItems.shared()
+        for item in items where item.ownerGone || item.sensitive || item.place == .shared {
+            print("  [\(item.place.rawValue)] \(item.name) — \(item.owner ?? "?") \(item.kind)\(item.sensitive ? " · keys" : "")\(item.ownerGone ? " · owner gone" : "")\(item.origin == .macOS ? " [macOS]" : "")")
+        }
+        print("  \(items.filter { $0.place == .home }.count) hidden items in home")
         lap("System Data")
         print("  snapshots: \(Snapshots.parse(Shell.run("/usr/bin/tmutil", ["listlocalsnapshots", "/"]).output).map(\.name))")
         for asset in SystemAssets.measure() { print("  \(asset.feature.rawValue): \(Bytes.text(asset.bytes)) in \(asset.folders.count) folders") }
