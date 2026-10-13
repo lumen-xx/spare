@@ -105,7 +105,10 @@ final class PackagesModel: ObservableObject {
             let command = first.manager.uninstall + (first.isCask ? ["--cask"] : [])
             let result = await background { Shell.run(command[0], Array(command.dropFirst()) + packages.map(\.name), timeout: 600) }
             if result.succeeded { removed += packages.map(\.name) }
-            else {
+            else if result.output.contains("sudo") || result.output.localizedCaseInsensitiveContains("password") {
+                // Some casks remove files only an administrator may; Homebrew asks for the password in Terminal only.
+                problems.append("\(first.manager.rawValue) needs your password for this. In Terminal, run: \(command.joined(separator: " ")) \(packages.map(\.name).joined(separator: " "))")
+            } else {
                 // Keep the tool's own words; Homebrew explains which package still needs it.
                 let lines = result.output.split(separator: "\n").map(String.init).filter { $0.localizedCaseInsensitiveContains("error") || $0.contains("required by") || $0.contains("Refusing") }
                 problems.append("\(first.manager.rawValue): " + (lines.isEmpty ? String(result.output.suffix(400)) : lines.prefix(4).joined(separator: " ")))

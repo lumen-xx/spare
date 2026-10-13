@@ -88,15 +88,26 @@ public struct Extension: Identifiable, Sendable, Hashable {
     public var origin: Origin
     /// In /Library: shared by every account, removing it needs an administrator password.
     public var forAllUsers: Bool
-    /// For system extensions: what macOS says about it, such as "activated enabled".
+    /// For system extensions: what macOS says about it, in plain words ("On", "Removed at restart").
     public var state: String?
     /// The app it belongs to, for things removed by uninstalling that app.
     public var owner: String?
+    public var ownerURL: URL?
+    /// How it goes away, when Spare can't move it itself.
+    public var note: String?
+    /// For installer packages: what of it is still installed and would be moved.
+    public var parts: [URL] = []
     public var bytes: Int64?
     public var id: String { category.rawValue + ":" + (url?.path ?? name) }
 
-    /// Spare can move it to the Trash itself. System extensions and installer receipts are removed another way.
-    public var removable: Bool { origin.removable && url != nil && category != .system && category != .receipts }
+    /// Spare can remove it itself. System extensions go only with their app; installer packages go by their receipt.
+    public var removable: Bool {
+        switch category {
+        case .system: false
+        case .receipts: origin.removable
+        default: origin.removable && url != nil
+        }
+    }
 
     public init(category: Category, name: String, url: URL?, detail: String? = nil, origin: Origin, forAllUsers: Bool,
                 state: String? = nil, owner: String? = nil, bytes: Int64? = nil) {
@@ -159,7 +170,10 @@ public enum Extensions {
             let identifier = fields[3]
             let bundleID = identifier.components(separatedBy: " (").first ?? identifier
             let version = identifier.range(of: "(").map { String(identifier[$0.upperBound...]).replacingOccurrences(of: ")", with: "") }
-            let state = fields[5].trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+            let raw = fields[5].trimmingCharacters(in: CharacterSet(charactersIn: "[] "))
+            let state = ["activated enabled": "On", "activated disabled": "Off", "activated waiting for user": "Waiting for approval",
+                         "terminated waiting to uninstall on reboot": "Removed at restart",
+                         "terminated waiting for uninstall on reboot": "Removed at restart"][raw] ?? raw
             let name = fields[4].isEmpty ? bundleID : fields[4]
             found.append(Extension(category: .system, name: name, url: nil,
                                    detail: [kind, version.map { "Version " + ($0.components(separatedBy: "/").first ?? $0) }, bundleID].compactMap { $0 }.joined(separator: " · "),
@@ -203,5 +217,115 @@ public enum Snapshots {
             let snapshot = LocalSnapshot(name: name, date: nil, dataless: trimmed.contains("(dataless)"))
             return LocalSnapshot(name: name, date: snapshot.stamp.flatMap { formatter.date(from: $0) }, dataless: snapshot.dataless)
         }
+    }
+}
+
+/// What an installer package left on the disk, worked out from its receipt, and what removing it would move.
+public struct ReceiptPlan: Sendable {
+    public let id: String
+    /// Items it installed that are still there, each removed whole: an app, a driver, a plug-in, a loose file.
+    public let roots: [URL]
+    public init(id: String, roots: [URL]) { self.id = id; self.roots = roots }
+}
+
+public enum Receipts {
+    /// Folders many packages put things into. Spare never removes these, only what a package put inside them.
+    static let sharedFolders: Set<String> = [
+        "/Applications", "/Library", "/usr", "/usr/local", "/usr/local/bin", "/usr/local/sbin", "/usr/local/lib", "/usr/local/libexec",
+        "/usr/local/share", "/usr/local/share/man", "/usr/local/share/man/man1", "/usr/local/share/man/man5", "/usr/local/share/man/man8",
+        "/usr/local/include", "/usr/local/etc", "/opt", "/private", "/private/etc", "/private/etc/paths.d", "/private/var", "/etc", "/etc/paths.d",
+        "/var", "/Users", "/Library/Application Support", "/Library/LaunchAgents", "/Library/LaunchDaemons", "/Library/PrivilegedHelperTools",
+        "/Library/Audio", "/Library/Audio/Plug-Ins", "/Library/Audio/Plug-Ins/HAL", "/Library/Audio/Plug-Ins/Components",
+        "/Library/Audio/Plug-Ins/VST", "/Library/Audio/Plug-Ins/VST3", "/Library/Audio/Presets", "/Library/Extensions", "/Library/Frameworks",
+        "/Library/Fonts", "/Library/Preferences", "/Library/Printers", "/Library/Input Methods", "/Library/Keyboard Layouts", "/Library/QuickLook",
+        "/Library/Spotlight", "/Library/PreferencePanes", "/Library/Screen Savers", "/Library/Internet Plug-Ins", "/Library/CoreMediaIO",
+        "/Library/CoreMediaIO/Plug-Ins", "/Library/CoreMediaIO/Plug-Ins/DAL", "/Library/Image Capture", "/Library/Image Capture/Devices",
+        "/Library/Caches", "/Library/Logs", "/Library/Developer", "/Library/Documentation", "/Library/Services", "/Library/ColorPickers",
+        "/Library/Contextual Menu Items", "/Library/Filesystems", "/Library/StartupItems", "/Library/Scripts", "/Library/Mail", "/Library/Mail/Bundles",
+        "/Library/Java", "/Library/Java/JavaVirtualMachines", "/Library/Video", "/Library/Video/Plug-Ins", "/Library/Widgets", "/Library/Components",
+        "/Library/DirectoryServices", "/Library/DirectoryServices/PlugIns", "/Library/ScriptingAdditions", "/Library/Automator", "/Library/Bundles"
+    ]
+
+    /// Places a package's own items may be removed from. macOS's folders, keychains and security plug-ins are never touched.
+    static func removable(_ path: String) -> Bool {
+        let allowed = ["/Applications/", "/Library/", "/usr/local/", "/opt/", "/private/etc/paths.d/", "/etc/paths.d/"]
+        let never = ["/Library/Apple/", "/Library/Keychains/", "/Library/Security/", "/Library/Receipts/", "/Library/SystemExtensions/"]
+        return allowed.contains { path.hasPrefix($0) } && !never.contains { path.hasPrefix($0) }
+    }
+
+    static let bundleExtensions: Set<String> = ["app", "driver", "kext", "plugin", "component", "vst", "vst3", "bundle", "framework", "prefpane",
+                                                "qlgenerator", "mdimporter", "saver", "appex", "dext", "systemextension", "mailbundle", "osax", "aaxplugin"]
+
+    /// Works out what of a package is still installed.
+    /// - Parameters:
+    ///   - volume: the disk it was installed on, from the receipt.
+    ///   - location: where on that disk the file list starts, such as "Library/Audio/Plug-Ins/HAL".
+    ///   - files: `pkgutil --files`.
+    public static func plan(id: String, volume: URL = URL(fileURLWithPath: "/"), location: String, files: [String]) -> ReceiptPlan {
+        let base = location.isEmpty || location == "/" ? volume : volume.appendingPathComponent(location)
+        // AppleDouble companions ("._name") aren't real files once installed.
+        let clean = files.filter { path in !path.split(separator: "/").contains { $0.hasPrefix("._") } && !path.isEmpty }
+        let listed = Set(clean)
+        var children: [String: Set<String>] = [:]
+        for path in clean {
+            var child = path
+            while true {
+                let parent = (child as NSString).deletingLastPathComponent
+                children[parent, default: []].insert(child)
+                if parent.isEmpty { break }
+                child = parent
+            }
+        }
+        var roots: [URL] = []
+        func absolute(_ relative: String) -> String { base.appendingPathComponent(relative).standardizedFileURL.path }
+        /// The same place as seen from the root of its disk, which the rules about shared folders are written for.
+        let volumePath = volume.standardizedFileURL.path
+        func onDisk(_ path: String) -> String {
+            volumePath == "/" ? path : path.hasPrefix(volumePath) ? String(path.dropFirst(volumePath.count)) : path
+        }
+
+        /// Every file and folder on the disk inside belongs to this package.
+        func ownsAll(_ url: URL, _ relative: String) -> Bool {
+            guard let walker = FileManager.default.enumerator(atPath: url.path) else { return false }
+            var seen = 0
+            for case let inner as String in walker {
+                seen += 1
+                if seen > 20_000 { return false }
+                let name = (inner as NSString).lastPathComponent
+                if name == ".DS_Store" || name.hasPrefix("._") { continue }
+                if !listed.contains(relative + "/" + inner) { return false }
+            }
+            return true
+        }
+
+        func visit(_ folder: String) {
+            for child in (children[folder] ?? []).sorted() {
+                let path = absolute(child)
+                let url = URL(fileURLWithPath: path)
+                var isFolder: ObjCBool = false
+                let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isFolder)
+                let link = (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+                guard exists || link else { continue }
+                if isFolder.boolValue && !link && sharedFolders.contains(onDisk(path)) { visit(child); continue }
+                guard removable(onDisk(path)) else { continue }
+                if !isFolder.boolValue || link || bundleExtensions.contains(url.pathExtension.lowercased()) || ownsAll(url, child) {
+                    roots.append(url)
+                } else {
+                    visit(child)
+                }
+            }
+        }
+        // A package installed into a bundle, such as "/Applications/Tailscale.app", owns that whole bundle.
+        var outer = volume
+        for component in location.split(separator: "/").map(String.init) {
+            outer.appendPathComponent(component)
+            if bundleExtensions.contains(outer.pathExtension.lowercased()) {
+                let exists = FileManager.default.fileExists(atPath: outer.path)
+                return ReceiptPlan(id: id, roots: exists && removable(onDisk(outer.standardizedFileURL.path)) ? [outer] : [])
+            }
+        }
+        // A package installed straight into a shared folder (such as an audio driver into HAL) starts below it.
+        visit("")
+        return ReceiptPlan(id: id, roots: roots)
     }
 }

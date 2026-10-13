@@ -194,6 +194,10 @@ enum Report {
             let origins = Dictionary(grouping: items, by: \.origin).map { "\($0.value.count) \($0.key.label)" }.sorted().joined(separator: ", ")
             print("  \(category.rawValue): \(origins). e.g. \(items.prefix(3).map { $0.name + ($0.owner.map { " (in \($0))" } ?? "") }.joined(separator: "; "))")
         }
+        for item in extensions where item.category == .receipts || item.category == .system {
+            print("    \(item.name) [\(item.state ?? "")]: \(item.note ?? "")")
+            for part in item.parts { print("      would move \(part.path)") }
+        }
         lap("System Data")
         print("  snapshots: \(Snapshots.parse(Shell.run("/usr/bin/tmutil", ["listlocalsnapshots", "/"]).output).map(\.name))")
         for asset in SystemAssets.measure() { print("  \(asset.feature.rawValue): \(Bytes.text(asset.bytes)) in \(asset.folders.count) folders") }

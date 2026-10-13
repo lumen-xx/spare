@@ -274,8 +274,9 @@ let extensionsText = """
     \t\tW5364U7YZB\tio.tailscale.ipn.macsys.network-extension (1.98.8/101.98.8)\tTailscale Network Extension\t[terminated waiting to uninstall on reboot]
     """
 let systemExtensions = Extensions.systemExtensions(extensionsText)
-check(systemExtensions.count == 2 && systemExtensions[0].state == "activated enabled" && systemExtensions[0].detail?.hasPrefix("Network extension · Version 1.102.4") == true,
-      "reads system extensions with their kind, version and state")
+check(systemExtensions.count == 2 && systemExtensions[0].state == "On" && systemExtensions[1].state == "Removed at restart"
+      && systemExtensions[0].detail?.hasPrefix("Network extension · Version 1.102.4") == true,
+      "reads system extensions with their kind, version and state in plain words")
 check(Extensions.receipts("com.apple.pkg.Core\nnet.mullvad.vpn\n").map(\.name) == ["net.mullvad.vpn"], "lists installer packages that aren't Apple's")
 
 let snapshots = Snapshots.parse("Snapshots for disk /:\ncom.apple.TimeMachine.2026-10-09-124133.local (dataless)\ncom.apple.TimeMachine.2026-10-12-134623.local\n")
@@ -291,6 +292,30 @@ check(SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Siri_Understanding") == 
       && SystemAsset.Feature.of("com_apple_MobileAsset_MacSoftwareUpdate") == .updates
       && SystemAsset.Feature.of("com_apple_MobileAsset_PKITrustStore") == .other,
       "sorts macOS's downloads by the feature that needs them")
+
+// A package installed into a shared folder, its files partly gone, next to someone else's.
+let volume = folder("volume")
+write("volume/Library/Audio/Plug-Ins/HAL/Loopback.driver/Contents/Info.plist", bytes: 10)
+write("volume/Library/Audio/Plug-Ins/HAL/Other.driver/Contents/Info.plist", bytes: 10)
+let driverPlan = Receipts.plan(id: "loop", volume: volume, location: "Library/Audio/Plug-Ins/HAL", files: ["._Loopback.driver", "Loopback.driver", "Loopback.driver/Contents", "Loopback.driver/Contents/Info.plist"])
+check(driverPlan.roots.map(\.lastPathComponent) == ["Loopback.driver"], "removes a package's driver whole, and nothing beside it")
+let gone = Receipts.plan(id: "gone", volume: volume, location: "Library/Audio/Plug-Ins/HAL", files: ["Gone.driver", "Gone.driver/Contents"])
+check(gone.roots.isEmpty, "a package whose files are gone leaves only its receipt")
+// Installed at the root: shared folders are walked through, a vendor folder shared with another package is not taken whole.
+write("volume/Applications/Tool.app/Contents/Info.plist", bytes: 10)
+write("volume/Library/Application Support/Vendor/tool.dat", bytes: 10)
+write("volume/Library/Application Support/Vendor/other-product.dat", bytes: 10)
+write("volume/Library/LaunchDaemons/com.vendor.tool.plist", bytes: 10)
+let rootPlan = Receipts.plan(id: "tool", volume: volume, location: "/", files: ["Applications", "Applications/Tool.app", "Applications/Tool.app/Contents",
+    "Applications/Tool.app/Contents/Info.plist", "Library", "Library/Application Support", "Library/Application Support/Vendor",
+    "Library/Application Support/Vendor/tool.dat", "Library/LaunchDaemons", "Library/LaunchDaemons/com.vendor.tool.plist"])
+let rootNames = Set(rootPlan.roots.map { $0.path.replacingOccurrences(of: volume.path, with: "") })
+check(rootNames == ["/Applications/Tool.app", "/Library/Application Support/Vendor/tool.dat", "/Library/LaunchDaemons/com.vendor.tool.plist"],
+      "takes the package's app, files and launch daemon, never a folder another package also uses (\(rootNames.sorted()))")
+
+write("volume/Applications/Client.app/Contents/Info.plist", bytes: 10)
+let bundlePlan = Receipts.plan(id: "client", volume: volume, location: "Applications/Client.app", files: ["Contents", "Contents/Info.plist"])
+check(bundlePlan.roots.map(\.lastPathComponent) == ["Client.app"], "a package installed into an app takes the whole app (\(bundlePlan.roots.map(\.path)))")
 
 // MARK: Catalog
 
