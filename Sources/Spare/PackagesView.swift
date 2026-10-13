@@ -215,108 +215,23 @@ struct PackagesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                if part == .managers {
-                    Picker("Manager", selection: $manager) {
-                        Text("All").tag("All")
-                        ForEach(model.managers, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
-                    }
-                    .fixedSize()
-                    Toggle("Only what you installed", isOn: $onlyRequested).toggleStyle(.checkbox)
-                        .help("Hide packages that were installed only because another package needs them")
-                } else {
-                    Text(part == .toolchains
-                         ? "Language versions and SDKs: Rust toolchains, Node, Python and Ruby versions, Xcode's Command Line Tools."
-                         : "Commands in /usr/local that no package manager tracks: copied there by hand or by an app's installer.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
-                }
-                Spacer()
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("Search", text: $search).textFieldStyle(.plain).frame(width: 160)
-                }
-                .padding(.horizontal, 9).padding(.vertical, 5)
-                .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
-            }
-            .padding(.horizontal, 18).padding(.vertical, 10)
-            if part == .managers && !model.unused.isEmpty {
-                HStack(spacing: 10) {
-                    Image(systemName: "leaf").foregroundStyle(.green)
-                    Text("\(model.unused.count == 1 ? "1 Homebrew formula was" : "\(model.unused.count) Homebrew formulae were") installed for packages that are gone, and nothing needs \(model.unused.count == 1 ? "it" : "them") now.")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Remove Unused…") { confirmingAutoremove = true }.disabled(model.working)
-                }
-                .padding(.horizontal, 18).padding(.bottom, 10)
-                // Its own view: two alerts on one view and only the last one ever shows.
-                .alert("Remove unused Homebrew formulae?", isPresented: $confirmingAutoremove) {
-                    Button("Remove", role: .destructive) { Task { await model.autoremove() } }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("\(model.unused.joined(separator: ", ")). Nothing installed needs them. Homebrew deletes them directly.")
-                }
-            }
-            Table(visible, selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("Name", value: \.name) { row in
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 5) { Text(row.name).lineLimit(1); OriginBadge(origin: row.package.origin) }
-                        if let note = row.package.note {
-                            Text(note).font(.system(size: 10.5)).foregroundStyle(row.package.kind == "Broken link" ? Color.orange : Color.secondary).lineLimit(1)
-                        } else if let summary = row.package.summary, !summary.isEmpty {
-                            Text(summary).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    .help([row.package.summary, row.package.note, row.package.location?.path].compactMap { $0 }.joined(separator: "\n"))
-                }
-                .width(min: 180, ideal: 260)
-                TableColumn(part == .managers ? "Manager" : "Kind", value: \.kind) { row in
-                    Text(part == .managers ? (row.package.isCask ? "Homebrew Cask" : row.manager) : row.kind)
-                }
-                .width(min: 70, ideal: 110)
-                TableColumn("Version", value: \.version).width(min: 60, ideal: 80)
-                TableColumn(part == .managers ? "Why It's Here" : "Where", value: \.why) { row in
-                    if part == .managers {
-                        Text(row.why).foregroundStyle(row.package.requested ? .primary : .secondary)
-                    } else {
-                        Text(row.package.location.map { Catalog.tilde($0, home: home) } ?? "—").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                    }
-                }
-                .width(min: 110, ideal: 170)
-                TableColumn("Needed By", value: \.neededBy) { row in
-                    Text(row.package.neededBy.isEmpty ? "—" : row.neededBy)
-                        .foregroundStyle(row.package.neededBy.isEmpty ? .tertiary : .primary)
-                        .lineLimit(1).help(row.neededBy)
-                }
-                .width(min: 90, ideal: 160)
-                TableColumn("Size", value: \.size) { row in SizeText(bytes: row.bytes) }.width(min: 60, ideal: 80)
-            }
-            .contextMenu(forSelectionType: PackageRow.ID.self) { ids in
-                let rows = model.rows.filter { ids.contains($0.id) }
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(rows.compactMap(\.package.location)) }
-                    .disabled(rows.allSatisfy { $0.package.location == nil })
-                Button("Copy Install Command") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(rows.map(\.package.reinstall).joined(separator: "\n"), forType: .string)
-                }
-                Divider()
-                Button("Uninstall…", role: .destructive) { selection = Set(ids); confirming = true }
-            }
-            .overlay {
-                if model.loading && model.rows.isEmpty { ProgressView("Asking package managers…") }
-                else if !model.loading && mine.isEmpty {
-                    EmptyNote(symbol: "shippingbox", title: "Nothing here", text: "Spare looks for Homebrew, npm, pnpm, Bun, Cargo, uv and pipx packages, language versions, and tools in /usr/local.")
-                }
-            }
-            HStack(spacing: 10) {
+            filters.arrives(0)
+            if part == .managers && !model.unused.isEmpty { unusedNote.arrives(1) }
+            TableCard(seed: "packages-\(part)") { table }.arrives(2, rise: 0)
+            ActionBar {
                 Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected · \(Bytes.text(chosen.compactMap(\.bytes).reduce(0, +)))")
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    .font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+                    .animation(Motion.count, value: chosen.count)
                 Spacer()
-                if model.working { ProgressView().controlSize(.small) }
-                Button(part == .managers ? "Uninstall…" : "Remove…", role: .destructive) { confirming = true }.disabled(chosen.isEmpty || model.working)
+                if model.working { ThinkingDots() }
+                Button(part == .managers ? "Uninstall…" : "Remove…", role: .destructive) { confirming = true }
+                    .spareButton(.secondary)
+                    .disabled(chosen.isEmpty || model.working)
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(.bar)
+            .arrives(3)
         }
+        .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItem {
                 Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
@@ -330,6 +245,104 @@ struct PackagesView: View {
             Text(uninstallMessage)
         }
         .onAppear { model.startIfNeeded() }
+    }
+
+    private var filters: some View {
+        HStack(spacing: 12) {
+            if part == .managers {
+                Picker("Manager", selection: $manager) {
+                    Text("All").tag("All")
+                    ForEach(model.managers, id: \.self) { Text($0.rawValue).tag($0.rawValue) }
+                }
+                .fixedSize()
+                Toggle("Only what you installed", isOn: $onlyRequested)
+                    .toggleStyle(SketchCheckStyle())
+                    .help("Hide packages that were installed only because another package needs them")
+            } else {
+                Text(part == .toolchains
+                     ? "Language versions and SDKs: Rust toolchains, Node, Python and Ruby versions, Xcode's Command Line Tools."
+                     : "Commands in /usr/local that no package manager tracks: copied there by hand or by an app's installer.")
+                    .font(.spare(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer()
+            SearchField(prompt: "Search", text: $search).frame(width: 190)
+        }
+        .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
+    }
+
+    private var unusedNote: some View {
+        HStack(spacing: 10) {
+            SymbolTile(symbol: "leaf", tint: Ink.sage, size: 24)
+            Text("\(model.unused.count == 1 ? "1 Homebrew formula was" : "\(model.unused.count) Homebrew formulae were") installed for packages that are gone, and nothing needs \(model.unused.count == 1 ? "it" : "them") now.")
+                .font(.spare(size: 12)).foregroundStyle(.secondary)
+            Spacer()
+            Button("Remove Unused…") { confirmingAutoremove = true }
+                .spareButton(.secondary).controlSize(.small)
+                .disabled(model.working)
+        }
+        .padding(.horizontal, 22).padding(.bottom, 12)
+        // Its own view: two alerts on one view and only the last one ever shows.
+        .alert("Remove unused Homebrew formulae?", isPresented: $confirmingAutoremove) {
+            Button("Remove", role: .destructive) { Task { await model.autoremove() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("\(model.unused.joined(separator: ", ")). Nothing installed needs them. Homebrew deletes them directly.")
+        }
+    }
+
+    private var table: some View {
+        Table(visible, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name) { row in
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 5) { Text(row.name).lineLimit(1); OriginBadge(origin: row.package.origin) }
+                    if let note = row.package.note {
+                        Text(note).font(.spare(size: 10.5)).foregroundStyle(row.package.kind == "Broken link" ? Ink.warm : Color.secondary).lineLimit(1)
+                    } else if let summary = row.package.summary, !summary.isEmpty {
+                        Text(summary).font(.spare(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .help([row.package.summary, row.package.note, row.package.location?.path].compactMap { $0 }.joined(separator: "\n"))
+            }
+            .width(min: 180, ideal: 260)
+            TableColumn(part == .managers ? "Manager" : "Kind", value: \.kind) { row in
+                Text(part == .managers ? (row.package.isCask ? "Homebrew Cask" : row.manager) : row.kind)
+            }
+            .width(min: 70, ideal: 110)
+            TableColumn("Version", value: \.version).width(min: 60, ideal: 80)
+            TableColumn(part == .managers ? "Why It's Here" : "Where", value: \.why) { row in
+                if part == .managers {
+                    Text(row.why).foregroundStyle(row.package.requested ? .primary : .secondary)
+                } else {
+                    Text(row.package.location.map { Catalog.tilde($0, home: home) } ?? "—").foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            .width(min: 110, ideal: 190)
+            TableColumn("Needed By", value: \.neededBy) { row in
+                Text(row.package.neededBy.isEmpty ? "—" : row.neededBy)
+                    .foregroundStyle(row.package.neededBy.isEmpty ? .tertiary : .primary)
+                    .lineLimit(1).help(row.neededBy)
+            }
+            .width(min: 90, ideal: 160)
+            TableColumn("Size", value: \.size) { row in SizeText(bytes: row.bytes) }.width(min: 60, ideal: 80)
+        }
+        .contextMenu(forSelectionType: PackageRow.ID.self) { ids in
+            let rows = model.rows.filter { ids.contains($0.id) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(rows.compactMap(\.package.location)) }
+                .disabled(rows.allSatisfy { $0.package.location == nil })
+            Button("Copy Install Command") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(rows.map(\.package.reinstall).joined(separator: "\n"), forType: .string)
+            }
+            Divider()
+            Button("Uninstall…", role: .destructive) { selection = Set(ids); confirming = true }
+        }
+        .overlay {
+            if model.loading && model.rows.isEmpty {
+                VStack(spacing: 8) { ThinkingDots(); Text("Asking package managers").font(.spare(size: 12)).foregroundStyle(.secondary) }
+            } else if !model.loading && mine.isEmpty {
+                EmptyState(doodle: .box, title: "Nothing here", text: "Spare looks for Homebrew, npm, pnpm, Bun, Cargo, uv and pipx packages, language versions, and tools in /usr/local.")
+            }
+        }
     }
 
     private var uninstallMessage: String {

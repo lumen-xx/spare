@@ -105,6 +105,14 @@ public enum Catalog {
              about: "Files apps keep to load things faster. macOS's own caches are left alone; it manages them itself.",
              afterwards: "Apps fill them again as you use them, and may feel slower at first. Caches of open apps aren't selected.",
              needsFullDiskAccess: false, find: findAppCaches),
+        Rule(id: "app-support-caches", title: "Browser and app caches", symbol: "globe", group: .caches, safety: .rebuilds,
+             about: "Caches Chromium browsers and Electron apps such as Slack, Discord and VS Code keep beside their data, which other cleaners miss.",
+             afterwards: "They fill again as you use them. Logins, history and saved data aren't caches and stay.",
+             needsFullDiskAccess: false, find: findAppSupportCaches),
+        Rule(id: "mail-downloads", title: "Mail attachments you opened", symbol: "paperclip", group: .caches, safety: .rebuilds,
+             about: "Copies Mail saves when you open an attachment. The messages keep their attachments.",
+             afterwards: "Mail makes a new copy the next time you open one.",
+             needsFullDiskAccess: true, find: findMailDownloads),
         Rule(id: "logs", title: "Logs", symbol: "doc.text", group: .caches, safety: .disposable,
              about: "Records apps write about what they did, for troubleshooting.",
              afterwards: "Nothing you'd notice. Apps start new ones.",
@@ -117,6 +125,10 @@ public enum Catalog {
              about: "Installers in Downloads, and large files there you haven't opened in two months.",
              afterwards: "They're gone unless you download them again.",
              needsFullDiskAccess: true, find: findDownloads),
+        Rule(id: "messages-attachments", title: "Messages attachments", symbol: "message", group: .review, safety: .review,
+             about: "Photos, videos and files from your conversations, largest first. Only ones of 5 MB or more are listed.",
+             afterwards: "The message stays, but the file is gone from this Mac. History can put it back until you empty the Trash.",
+             needsFullDiskAccess: true, find: findMessagesAttachments),
         Rule(id: "ios-backups", title: "iPhone and iPad backups", symbol: "iphone.gen3", group: .review, safety: .review,
              about: "Complete local backups made with Finder. iCloud backups aren't here and aren't affected.",
              afterwards: "That device can no longer be restored from this backup.",
@@ -239,6 +251,97 @@ public enum Catalog {
         return items
     }
 
+    /// Folders Chromium and Electron fill with caches. Everything else beside them, such as Local Storage, IndexedDB or
+    /// Service Worker, is the app's data.
+    static let chromiumCacheNames: Set<String> = ["Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache",
+                                                  "GraphiteDawnCache", "GrShaderCache", "ShaderCache", "CachedData"]
+
+    /// Folders in Application Support that hold no app's caches and that macOS may guard with a permission prompt.
+    static let guardedSupportNames: Set<String> = ["AddressBook", "CallHistoryDB", "CallHistoryTransactions", "MobileSync", "Knowledge",
+                                                   "FileProvider", "CloudDocs", "FaceTime", "Dock", "DifferentialPrivacy", "Mobile Documents"]
+
+    /// Names for folders that don't say which app they belong to.
+    static let supportFolderNames = ["Google/Chrome": "Google Chrome", "Google/Chrome Beta": "Chrome Beta", "Google/Chrome Canary": "Chrome Canary",
+                                     "BraveSoftware/Brave-Browser": "Brave", "BraveSoftware/Brave-Browser-Beta": "Brave Beta",
+                                     "BraveSoftware/Brave-Browser-Nightly": "Brave Nightly", "Arc/User Data": "Arc", "Code": "Visual Studio Code",
+                                     "Code - Insiders": "Visual Studio Code - Insiders", "com.operasoftware.Opera": "Opera"]
+
+    /// A Chromium browser's or Electron app's own folder: only they write these files, so a folder called Cache
+    /// anywhere else is never taken.
+    static func isChromiumData(_ folder: URL) -> Bool {
+        ["Network Persistent State", "Local State", "Network/Network Persistent State"].contains { exists(folder.appendingPathComponent($0)) }
+    }
+
+    @Sendable static func findAppSupportCaches(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
+        let support = context.path("Library/Application Support")
+        // One app each: its name, the folder names that tell whether it's open, and the folders holding its caches.
+        var apps: [(label: String, names: [String], folders: [URL])] = []
+        for top in list(support) where isFolder(top) {
+            guard !cancel.isCancelled else { break }
+            let name = top.lastPathComponent
+            guard !name.hasPrefix("."), !name.hasPrefix("com.apple."), !Apps.systemNames.contains(name), !guardedSupportNames.contains(name) else { continue }
+            if isChromiumData(top) {
+                // An Electron app's own folder, or a browser such as Edge whose profiles sit directly inside.
+                apps.append((supportLabel(name, context), [name], chromiumFolders(in: top)))
+            } else {
+                // A company's folder with a browser inside: Google/Chrome, BraveSoftware/Brave-Browser, Arc/User Data.
+                for child in list(top) where isFolder(child) && isChromiumData(child) {
+                    let key = "\(name)/\(child.lastPathComponent)"
+                    let generic = child.lastPathComponent == "User Data" || child.lastPathComponent == "Default"
+                    let label = supportFolderNames[key] ?? (generic ? supportLabel(name, context) : supportLabel(child.lastPathComponent, context))
+                    apps.append((label, [name, child.lastPathComponent], chromiumFolders(in: child)))
+                }
+            }
+        }
+        var items: [Item] = []
+        for app in apps {
+            let caches = app.folders.flatMap { folder in
+                list(folder).filter { chromiumCacheNames.contains($0.lastPathComponent) && isFolder($0) }
+            }
+            guard !caches.isEmpty, !cancel.isCancelled else { continue }
+            let usages = measure(caches, cancel: cancel)
+            let kept = caches.indices.filter { usages[$0].bytes + usages[$0].shared > 0 }
+            let usage = kept.map { usages[$0] }.reduce(Usage(), +)
+            guard usage.bytes >= 100_000 else { continue }
+            let open = app.names.contains(where: context.isOpen)
+            items.append(Item(urls: kept.map { caches[$0] }, label: app.label, detail: open ? "Open now. Quit it first to clean this." : nil,
+                              usage: usage, suggested: !open))
+        }
+        return items
+    }
+
+    /// The folder itself and its profiles: the folders directly inside that are Chromium's too, and the partitions
+    /// Electron apps keep for separate sign-ins.
+    static func chromiumFolders(in root: URL) -> [URL] {
+        var folders = [root]
+        for child in list(root) where isFolder(child) && !chromiumCacheNames.contains(child.lastPathComponent) {
+            if child.lastPathComponent == "Partitions" {
+                folders += list(child).filter { isFolder($0) && isChromiumData($0) }
+            } else if isChromiumData(child) {
+                folders.append(child)
+            }
+        }
+        return folders
+    }
+
+    /// The app's name for a bundle identifier, a known folder's name, or the folder's own name tidied up: "discord" is Discord.
+    static func supportLabel(_ folder: String, _ context: ScanContext) -> String {
+        if let name = supportFolderNames[folder] ?? context.appName(folder) { return name }
+        guard folder.allSatisfy({ !$0.isUppercase }) else { return folder }
+        return folder.split(whereSeparator: { $0 == "-" || $0 == "_" }).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
+    @Sendable static func findMailDownloads(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
+        guard context.fullDiskAccess else { return [] }
+        let folder = context.path("Library/Containers/com.apple.mail/Data/Library/Mail Downloads")
+        let entries = list(folder)
+        guard !entries.isEmpty else { return [] }
+        let usage = measure(entries, cancel: cancel).reduce(Usage(), +)
+        guard usage.files > 0 else { return [] }
+        return [Item(urls: entries, label: usage.files == 1 ? "1 attachment" : "\(usage.files) attachments",
+                     detail: tilde(folder, home: context.home), usage: usage, suggested: true)]
+    }
+
     @Sendable static func findLogs(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
         children(of: context.path("Library/Logs"), except: ["DiagnosticReports", "CoreSimulator", "com.apple.xpc.launchd"], cancel: cancel) { url in
             (url.deletingPathExtension().lastPathComponent, modified(url).map { "Last written " + ago($0, from: context.now) })
@@ -270,6 +373,25 @@ public enum Catalog {
             let when = used.map { "opened " + ago($0, from: context.now) } ?? "never opened"
             return Item(urls: [url], label: url.lastPathComponent, detail: (installer ? "Installer · " : "") + when, usage: usage, suggested: false)
         }
+    }
+
+    @Sendable static func findMessagesAttachments(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
+        guard context.fullDiskAccess else { return [] }
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isPackageKey, .totalFileAllocatedSizeKey, .creationDateKey]
+        guard let walk = FileManager.default.enumerator(at: context.path("Library/Messages/Attachments"), includingPropertiesForKeys: keys,
+                                                        options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return [] }
+        var items: [Item] = []
+        for case let url as URL in walk {
+            guard !cancel.isCancelled else { break }
+            guard let values = try? url.resourceValues(forKeys: Set(keys)), values.isRegularFile == true || values.isPackage == true else { continue }
+            // A quick look at the size first, so only the large ones are measured properly.
+            if values.isRegularFile == true, (values.totalFileAllocatedSize ?? 0) < 5_000_000 { continue }
+            let usage = DiskUsage.measure(url, cancel: cancel)
+            guard usage.bytes >= 5_000_000 else { continue }
+            items.append(Item(urls: [url], label: url.lastPathComponent, detail: values.creationDate.map { "From " + ago($0, from: context.now) },
+                              usage: usage, suggested: false))
+        }
+        return items.sorted { $0.usage.bytes > $1.usage.bytes }
     }
 
     @Sendable static func findDeviceBackups(_ context: ScanContext, _ cancel: Cancellation) -> [Item] {
@@ -363,6 +485,8 @@ public enum Catalog {
     }
 
     static func exists(_ url: URL) -> Bool { FileManager.default.fileExists(atPath: url.path) }
+
+    static func isFolder(_ url: URL) -> Bool { (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
 
     static func modified(_ url: URL) -> Date? { (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate }
 

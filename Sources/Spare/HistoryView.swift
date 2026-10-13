@@ -8,21 +8,17 @@ struct HistoryView: View {
     var body: some View {
         Group {
             if model.sessions.isEmpty {
-                EmptyNote(symbol: "clock.arrow.circlepath", title: "Nothing moved yet",
-                          text: "Everything Spare moves to the Trash is listed here, so you can put it back until the Trash is emptied.")
+                EmptyState(doodle: .clock, title: "Nothing moved yet",
+                           text: "Everything Spare moves to the Trash is listed here, so you can put it back until the Trash is emptied.")
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 24) {
-                        Text("Put things back as long as they're still in the Trash. Once the Trash is emptied they're gone for good.")
-                            .font(.system(size: 12.5)).foregroundStyle(.secondary)
-                        ForEach(model.sessions) { session in SessionView(session: session) }
+                PageScroll(spacing: 24) {
+                    Text("Put things back as long as they're still in the Trash. Once the Trash is emptied they're gone for good.")
+                        .font(.spare(size: 12.5)).foregroundStyle(.secondary)
+                        .arrives(0)
+                    ForEach(Array(model.sessions.enumerated()), id: \.element.id) { index, session in
+                        SessionView(session: session).arrives(index + 1)
                     }
-                    .padding(.horizontal, 30).padding(.top, 22).padding(.bottom, 90)
-                    .frame(maxWidth: 860, alignment: .leading)
-                    .frame(maxWidth: .infinity)
                 }
-                .scrollIndicators(.never)
-                .defaultScrollAnchor(.top)
                 .id(model.revision)
             }
         }
@@ -40,38 +36,43 @@ struct SessionView: View {
     let session: TrashSession
     @ObservedObject var model = HistoryModel.shared
     @State private var expanded = false
+    @Environment(\.reduceMotion) private var reduceMotion
 
     var body: some View {
         let states = session.records.map(\.state)
         let inTrash = states.filter { $0 == .inTrash }.count
         VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(session.title).font(.system(size: 14, weight: .semibold))
-                    Text("\(session.date.formatted(date: .abbreviated, time: .shortened)) · \(session.records.count == 1 ? "1 item" : "\(session.records.count) items")\(session.bytes > 0 ? " · " + Bytes.text(session.bytes) : "")")
-                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            SectionHeading(title: session.title,
+                           subtitle: "\(session.date.formatted(date: .abbreviated, time: .shortened)) · \(session.records.count == 1 ? "1 item" : "\(session.records.count) items")\(session.bytes > 0 ? " · " + Bytes.text(session.bytes) : "")") {
+                HStack(spacing: 8) {
+                    Text(inTrash == 0 ? (states.contains(.putBack) ? "Put back" : "Trash emptied")
+                         : inTrash == states.count ? "In the Trash" : "\(inTrash) still in the Trash")
+                        .font(.spare(size: 11.5)).foregroundStyle(.secondary)
+                    Button("Put Back All") { model.putBack(session: session.id) }
+                        .spareButton(.secondary)
+                        .controlSize(.small)
+                        .disabled(inTrash == 0)
+                    Menu {
+                        Button("Forget This") { model.forget(session.id) }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().foregroundStyle(.secondary)
+                    .accessibilityLabel("More")
                 }
-                Spacer()
-                Text(inTrash == 0 ? (states.contains(.putBack) ? "Put back" : "Trash emptied")
-                     : inTrash == states.count ? "In the Trash" : "\(inTrash) still in the Trash")
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
-                Button("Put Back All") { model.putBack(session: session.id) }
-                    .controlSize(.small).disabled(inTrash == 0)
-                Menu {
-                    Button("Forget This") { model.forget(session.id) }
-                } label: { Image(systemName: "ellipsis.circle") }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().foregroundStyle(.secondary)
             }
-            Panel {
+            Card(seed: Jitter.seed(session.id.uuidString)) {
                 let shown = expanded ? session.records : Array(session.records.prefix(5))
                 ForEach(Array(shown.enumerated()), id: \.element.id) { index, record in
-                    if index > 0 { Divider().padding(.leading, 40) }
+                    if index > 0 { SketchDivider(seed: Jitter.seed(record.original)).padding(.leading, 42).padding(.trailing, 12) }
                     RecordRow(record: record)
                 }
                 if session.records.count > 5 {
-                    Divider()
-                    Button(expanded ? "Show fewer" : "Show all \(session.records.count)") { withAnimation(.snappy) { expanded.toggle() } }
-                        .buttonStyle(.borderless).font(.system(size: 12)).padding(10)
+                    SketchDivider(seed: Jitter.seed(session.title)).padding(.horizontal, 12)
+                    Button(expanded ? "Show fewer" : "Show all \(session.records.count)") {
+                        withAnimation(reduceMotion ? Motion.calm : Motion.expand) { expanded.toggle() }
+                    }
+                    .spareButton(.quiet)
+                    .controlSize(.small)
+                    .padding(8)
                 }
             }
         }
@@ -86,11 +87,12 @@ struct RecordRow: View {
         let state = record.state
         HStack(spacing: 10) {
             Image(systemName: state == .inTrash ? "trash" : state == .putBack ? "arrow.uturn.backward.circle" : "xmark.circle")
-                .font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 18)
+                .font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
-                Text(URL(fileURLWithPath: record.original).lastPathComponent).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
+                Text(URL(fileURLWithPath: record.original).lastPathComponent).font(.spare(size: 12.5)).lineLimit(1).truncationMode(.middle)
                 Text(Catalog.tilde(URL(fileURLWithPath: record.original), home: home))
-                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    .font(.spare(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 8)
             if let bytes = record.bytes, bytes > 0 { SizeText(bytes: bytes) }
@@ -100,11 +102,12 @@ struct RecordRow: View {
                     let problems = model.putBack([record])
                     if !problems.isEmpty { Shared.shared.banner = .init(title: "Couldn't put it back", detail: nil, problems: problems, failed: true) }
                 }
+                .spareButton(.secondary)
                 .controlSize(.small)
             case .putBack:
-                Text("Put back").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                Text("Put back").font(.spare(size: 11.5)).foregroundStyle(.secondary)
             case .gone:
-                Text("Deleted").font(.system(size: 11.5)).foregroundStyle(.tertiary)
+                Text("Deleted").font(.spare(size: 11.5)).foregroundStyle(.tertiary)
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)

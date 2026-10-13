@@ -5,11 +5,11 @@ enum StartupState: String {
     case running = "Running", waiting = "Waiting", off = "Off", turnedOff = "Turned off", notAllowed = "Not allowed", leftBehind = "Left behind"
     var color: Color {
         switch self {
-        case .running: .green
-        case .waiting: .blue
+        case .running: Ink.sage
+        case .waiting: Ink.ink
         case .off, .turnedOff: .secondary
         case .notAllowed: .secondary
-        case .leftBehind: .orange
+        case .leftBehind: Ink.warm
         }
     }
     var help: String {
@@ -285,51 +285,19 @@ struct StartupView: View {
                 Text(part == .login
                      ? "Apps and helpers that open when you log in. Apps add these themselves; switch them off in Login Items settings, or uninstall the app."
                      : "Agents, services and helpers that run in the background, at startup or on a schedule. Select several with ⌘ or ⇧.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.spare(size: 12)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer(minLength: 8)
                 if part == .background {
                     Picker("Show", selection: $filter) { ForEach(Filter.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().fixedSize()
                 }
             }
-            .padding(.horizontal, 18).padding(.vertical, 12)
-            Table(visible, selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("Name", value: \.name) { row in
-                    HStack(spacing: 8) {
-                        if let url = row.appURL { Image(nsImage: AppLookup.icon(for: url, size: 20)).frame(width: 20, height: 20) }
-                        else { Image(systemName: row.state == .leftBehind ? "questionmark.folder" : "gearshape.2").frame(width: 20).foregroundStyle(.secondary) }
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack(spacing: 5) {
-                                Text(row.name).lineLimit(1)
-                                OriginBadge(origin: row.origin)
-                            }
-                            if let note = row.note { Text(note).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
-                        }
-                    }
-                    .help(row.note ?? row.name)
-                }
-                .width(min: 200, ideal: 260)
-                TableColumn("Kind", value: \.kind).width(min: 120, ideal: 140)
-                TableColumn("Runs", value: \.schedule).width(min: 95, ideal: 115)
-                TableColumn("State", value: \.stateText) { row in
-                    HStack(spacing: 5) {
-                        Circle().fill(row.state.color).frame(width: 6, height: 6)
-                        Text(row.state.rawValue).foregroundStyle(row.state == .leftBehind ? .orange : .primary)
-                    }
-                    .help(row.state.help)
-                }
-                .width(min: 95, ideal: 105)
-                TableColumn("From", value: \.from).width(min: 90, ideal: 130)
-                TableColumn("Where", value: \.place).width(min: 100, ideal: 115)
-            }
-            .contextMenu(forSelectionType: StartupRow.ID.self) { ids in menu(for: model.rows.filter { ids.contains($0.id) }) }
-                primaryAction: { ids in
-                    let files = model.rows.filter { ids.contains($0.id) }.compactMap { $0.file ?? $0.appURL }
-                    if !files.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(files) }
-                }
-            .overlay { if model.loading && model.rows.isEmpty { ProgressView() } }
-            actionBar
+            .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
+            .arrives(0)
+            TableCard(seed: "startup-\(part)") { table }.arrives(1, rise: 0)
+            actionBar.arrives(2)
         }
+        .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItemGroup {
                 Button { Permissions.openLoginItemsSettings() } label: { Label("Login Items Settings", systemImage: "switch.2") }
@@ -345,6 +313,51 @@ struct StartupView: View {
             Text("They stop now and won't start again. \(chosen.contains { $0.removable && $0.job?.scope != .user } ? "macOS asks for an administrator password once. " : "")Their files go to the Trash, and History can put them back. Apps they belong to may stop updating or syncing.")
         }
         .onAppear { model.startIfNeeded() }
+    }
+
+    private var table: some View {
+        Table(visible, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name) { row in
+                HStack(spacing: 8) {
+                    if let url = row.appURL { Image(nsImage: AppLookup.icon(for: url, size: 20)).frame(width: 20, height: 20) }
+                    else { Image(systemName: row.state == .leftBehind ? "questionmark.folder" : "gearshape.2").frame(width: 20).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 5) {
+                            Text(row.name).lineLimit(1)
+                            OriginBadge(origin: row.origin)
+                        }
+                        if let note = row.note { Text(note).font(.spare(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle) }
+                    }
+                }
+                .help(row.note ?? row.name)
+            }
+            .width(min: 200, ideal: 260)
+            TableColumn("Kind", value: \.kind).width(min: 120, ideal: 140)
+            TableColumn("Runs", value: \.schedule).width(min: 95, ideal: 115)
+            TableColumn("State", value: \.stateText) { row in
+                HStack(spacing: 6) {
+                    Circle().fill(row.state.color).frame(width: 6, height: 6)
+                    Text(row.state.rawValue).foregroundStyle(row.state == .leftBehind ? Ink.warm : .primary)
+                }
+                .help(row.state.help)
+            }
+            .width(min: 95, ideal: 105)
+            TableColumn("From", value: \.from).width(min: 90, ideal: 130)
+            TableColumn("Where", value: \.place).width(min: 100, ideal: 115)
+        }
+        .contextMenu(forSelectionType: StartupRow.ID.self) { ids in menu(for: model.rows.filter { ids.contains($0.id) }) }
+            primaryAction: { ids in
+                let files = model.rows.filter { ids.contains($0.id) }.compactMap { $0.file ?? $0.appURL }
+                if !files.isEmpty { NSWorkspace.shared.activateFileViewerSelecting(files) }
+            }
+        .overlay {
+            if model.loading && model.rows.isEmpty {
+                VStack(spacing: 8) { ThinkingDots(); Text("Reading what starts on its own").font(.spare(size: 12)).foregroundStyle(.secondary) }
+            } else if !model.loading && mine.isEmpty {
+                EmptyState(doodle: .moon, title: part == .login ? "Nothing opens at login" : "Nothing runs in the background",
+                           text: part == .login ? "No apps or helpers are set to open when you log in." : "No agents, services or helpers were added to this Mac.")
+            }
+        }
     }
 
     private var removeTitle: String {
@@ -369,23 +382,23 @@ struct StartupView: View {
     private var actionBar: some View {
         let rows = chosen
         let locked = rows.filter { !$0.removable && !$0.toggleable }.count
-        return HStack(spacing: 10) {
+        return ActionBar {
             Text(rows.isEmpty ? countText(visible.count, "item") : "\(rows.count) selected" + (locked > 0 && part == .background ? " · \(locked) changed only in Settings or by uninstalling the app" : ""))
-                .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
-            if model.working { ProgressView().controlSize(.small) }
+            if model.working { ThinkingDots() }
             if part == .login {
                 // Apps register these with macOS themselves; only Login Items settings, or uninstalling the app, changes them.
-                Button("Open Login Items Settings…") { Permissions.openLoginItemsSettings() }
+                Button("Open Login Items Settings…") { Permissions.openLoginItemsSettings() }.spareButton(.secondary)
             } else {
-                Button("Turn Off") { Task { await model.setOn(false, rows) } }.disabled(!rows.contains(where: \.toggleable) || model.working)
-                Button("Turn On") { Task { await model.setOn(true, rows) } }.disabled(!rows.contains(where: \.toggleable) || model.working)
-                Button("Remove…", role: .destructive) { confirming = true }.disabled(!rows.contains(where: \.removable) || model.working)
+                Button("Turn Off") { Task { await model.setOn(false, rows) } }
+                    .spareButton(.secondary).disabled(!rows.contains(where: \.toggleable) || model.working)
+                Button("Turn On") { Task { await model.setOn(true, rows) } }
+                    .spareButton(.secondary).disabled(!rows.contains(where: \.toggleable) || model.working)
+                Button("Remove…", role: .destructive) { confirming = true }
+                    .spareButton(.secondary).disabled(!rows.contains(where: \.removable) || model.working)
             }
         }
-        .controlSize(.regular)
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(.bar)
     }
 }
 
@@ -395,15 +408,10 @@ struct OriginBadge: View {
     var body: some View {
         switch origin {
         case .macOS:
-            Label("macOS", systemImage: "lock.fill").labelStyle(.titleAndIcon)
-                .font(.system(size: 9.5, weight: .semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Color.primary.opacity(0.08), in: Capsule())
+            Tag(text: "macOS", tint: .secondary, symbol: "lock.fill")
                 .help("Part of macOS. Spare doesn't remove it.")
         case .apple:
-            Text("Apple").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(.secondary)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Color.primary.opacity(0.08), in: Capsule())
+            Tag(text: "Apple", tint: .secondary)
                 .help("Made by Apple and added later. It can be removed.")
         case .thirdParty:
             EmptyView()

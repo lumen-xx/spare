@@ -14,6 +14,9 @@ func background<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
 enum Preferences {
     static var projectRoots: [URL] {
         get {
+            #if DEBUG
+            if Demo.isOn { return [home.appendingPathComponent("code"), home.appendingPathComponent("Projects")] }
+            #endif
             guard let paths = UserDefaults.standard.stringArray(forKey: "projectRoots") else { return Projects.defaultRoots(home: home) }
             return paths.map { URL(fileURLWithPath: $0) }
         }
@@ -32,14 +35,23 @@ final class Shared: ObservableObject {
     static let shared = Shared()
 
     struct Banner: Identifiable, Equatable {
+        /// What to do about it: try again, or open the setting that fixes it.
+        struct Next {
+            var title: String
+            var run: @MainActor () -> Void
+        }
+
         let id = UUID()
         var title: String
         var detail: String?
         var session: UUID?
         var problems: [String] = []
         var offerEmptyTrash = false
-        /// Something didn't work: shown with a warning instead of a tick.
+        /// Something didn't work: shown with a warning instead of a tick, and it stays until it's dismissed.
         var failed = false
+        var next: Next?
+
+        static func == (a: Banner, b: Banner) -> Bool { a.id == b.id }
     }
 
     @Published private(set) var space: Volume.Space?
@@ -109,7 +121,8 @@ final class Shared: ObservableObject {
         guard fullDiskAccess else {
             // Without Full Disk Access macOS hides the Trash's contents from Spare, so Finder has to do it.
             if let problem = Privileged.emptyTrash() {
-                banner = Banner(title: "The Trash wasn't emptied", detail: problem + " Giving Spare Full Disk Access lets it empty the Trash itself.", failed: true)
+                banner = Banner(title: "The Trash wasn't emptied", detail: problem + " Giving Spare Full Disk Access lets it empty the Trash itself.",
+                                failed: true, next: .init(title: "Open Settings…") { Permissions.openFullDiskAccessSettings() })
             } else {
                 banner = Banner(title: "Emptied the Trash", detail: nil)
             }
@@ -601,10 +614,19 @@ final class HistoryModel: ObservableObject {
     /// Changes whenever items may have moved, so their state is read again.
     @Published private(set) var revision = 0
 
-    init() { sessions = store.load() }
+    init() {
+        #if DEBUG
+        // Screenshots never show what this Mac really moved.
+        if Demo.isOn { return }
+        #endif
+        sessions = store.load()
+    }
 
     func add(_ session: TrashSession) {
         sessions.insert(session, at: 0)
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         store.save(sessions)
     }
 
@@ -651,6 +673,7 @@ final class HistoryModel: ObservableObject {
         if session.title == "Cleanup" { CleanupModel.shared.scanIfStarted() }
         if session.title.hasPrefix("Uninstalled") || session.title.hasPrefix("Leftovers") { AppsModel.shared.load() }
         if session.title.hasPrefix("Removed") { StartupModel.shared.load(); ExtensionsModel.shared.load() }
+        if session.title.hasPrefix("Leftover macOS") { MacDownloadsModel.shared.reloadIfStarted() }
     }
 
     func forget(_ id: UUID) {

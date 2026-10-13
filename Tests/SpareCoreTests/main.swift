@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import SQLite3
 import SpareCore
 
 // Self-contained checks for Spare's scanning logic, run with `swift run SpareChecks`. Everything happens inside a
@@ -286,12 +287,14 @@ check(snapshots.count == 2 && snapshots[0].dataless && !snapshots[1].dataless &&
 check(Origins.origin(of: URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")) != .thirdParty, "knows Finder is Apple's")
 check(Origins.origin(of: root.appendingPathComponent("lonely.bin")) == .thirdParty, "treats a file no installer put there as added")
 
-check(SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Siri_Understanding") == .appleIntelligence
-      && SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition") == .dictation
+check(SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Siri_Understanding") == .siriSpeech
+      && SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition") == .siriSpeech
       && SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Siri_TextToSpeech") == .voices
       && SystemAsset.Feature.of("com_apple_MobileAsset_MacSoftwareUpdate") == .updates
       && SystemAsset.Feature.of("com_apple_MobileAsset_PKITrustStore") == .other,
       "sorts macOS's downloads by the feature that needs them")
+check(SystemAsset.Feature.allCases.allSatisfy { $0.about.hasSuffix(".") && $0.remedy.hasSuffix(".") && !$0.remedy.hasPrefix($0.about) },
+      "says what each kind of download is and, separately, what lets macOS remove it")
 
 // A package installed into a shared folder, its files partly gone, next to someone else's.
 let volume = folder("volume")
@@ -410,6 +413,570 @@ let shortcuts = Apps.systemLeftovers(root: systemRoot, cancel: Cancellation(), c
                                      nameInUse: { $0 == "Mozilla" }, origin: { _ in .thirdParty }, inUse: { _ in false })
 check(shortcuts.contains { $0.bundleID == "Gone Suite" } && !shortcuts.contains { $0.bundleID == "Live link" || $0.bundleID == "Here.app" },
       "finds folders of shortcuts to removed apps, keeping working ones")
+
+// MARK: macOS's own clean-up
+
+@discardableResult
+func text(_ relative: String, _ content: String) -> URL {
+    let url = root.appendingPathComponent(relative)
+    try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? Data(content.utf8).write(to: url)
+    return url
+}
+
+let cacheDeleteAnswer: [String: Any] = [
+    "CACHE_DELETE_TOTAL_AVAILABLE": 41_000_000_000, "CACHE_DELETE_VOLUME": "/System/Volumes/Data", "CACHE_DELETE_CACHED_RESULT": kCFBooleanTrue!,
+    "CACHE_DELETE_SERVICE_NAMES": ["com.apple.TMCacheDelete": "Time Machine"],
+    "com.apple.TMCacheDelete": NSNumber(value: Int64(40_520_339_456)), "com.apple.fspurgeable_data": 1_014_571_008, "com.apple.MAIL": 0,
+    "com.example.flag": true, "com.example.nested": ["bytes": 5], "com.example.negative": -5
+]
+check(CacheDelete.itemized(cacheDeleteAnswer) == ["com.apple.TMCacheDelete": 40_520_339_456, "com.apple.fspurgeable_data": 1_014_571_008,
+                                                   "com.apple.MAIL": 0, "com.example.negative": 0],
+      "reads macOS's purgeable space per service, without its own totals, flags or nested answers")
+
+let gained = CacheDelete.PurgeResult(service: "s", reported: 100, freeBefore: 1_000, freeAfter: 5_000)
+let filledAgain = CacheDelete.PurgeResult(service: "s", reported: 700, freeBefore: 5_000, freeAfter: 4_000)
+let decoded = (try? JSONEncoder().encode(gained)).flatMap { try? JSONDecoder().decode(CacheDelete.PurgeResult.self, from: $0) }
+check(gained.freed == 4_000 && filledAgain.freed == 700 && CacheDelete.PurgeResult(service: "s", error: "x").freed == 0
+      && CacheDelete.PurgeResult(service: "s", reported: -3).freed == 0 && decoded == gained,
+      "counts what a purge freed by the volume's gain, else by what macOS reported")
+check(CacheDelete.Service.allCases.filter(\.spareFrees) == [.purgeableFiles, .macOSDownloads]
+      && CacheDelete.Service.macOSDownloads.urgency == 1 && CacheDelete.Service.purgeableFiles.urgency == 3 && CacheDelete.Service.timeMachine.urgency == 3
+      && CacheDelete.Service.allCases.allSatisfy { !$0.title.isEmpty && $0.about.hasSuffix(".") },
+      "offers only purgeable files and macOS's unneeded downloads, each at its own urgency")
+
+// MARK: Apple Intelligence
+
+check(AppleIntelligence.baseLanguage("de-DE") == "de" && AppleIntelligence.baseLanguage("en_GB") == "en" && AppleIntelligence.baseLanguage("en") == "en"
+      && AppleIntelligence.baseLanguage("zh-Hans-CN") == "zh" && AppleIntelligence.baseLanguage("yue-CN") == "yue",
+      "compares languages without their region or script")
+
+func aiStatus(_ system: String?, _ siri: String?, _ answer: Int?, models: Bool? = false, saved: Bool = false, vm: Bool = false) -> AppleIntelligence.Status {
+    AppleIntelligence.evaluate(systemLanguage: system, siriLanguage: siri, siriEnabled: false, eligibilityAnswer: answer, modelsSelected: models,
+                               savedBySpare: saved, isVirtualMachine: vm)
+}
+let likeThisMac = aiStatus("en-GB", "de-DE", nil)
+check(likeThisMac.state == .off && likeThisMac.eligible == nil
+      && likeThisMac.explanation == "Off: Siri speaks German and your Mac English, so macOS keeps Apple Intelligence switched off.",
+      "explains that Apple Intelligence is off while Siri and the Mac speak different languages")
+check(aiStatus("en-GB", "en-US", 4).state == .on && aiStatus("en-GB", "en-GB", nil).state == .on
+      && aiStatus("en-GB", "en-US", 4).explanation.hasPrefix("On: Siri and your Mac both use English"),
+      "sees Apple Intelligence on while Siri follows the Mac's language")
+check(aiStatus("en-GB", "de-DE", 2, models: true).state == .releasing && aiStatus("en-GB", "en-GB", 2).state == .unavailable
+      && aiStatus("en-GB", "en-GB", 4, vm: true).state == .unavailable && aiStatus(nil, nil, nil).state == .unknown
+      && aiStatus(nil, nil, 2).explanation == "Off: macOS keeps Apple Intelligence switched off."
+      && aiStatus("en-GB", "de-DE", 2, saved: true).explanation.hasSuffix(" Turning it on puts your Siri settings back."),
+      "tells held models, Macs without Apple Intelligence, virtual machines and unknowns apart")
+
+let siriSpeaks = ["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "ja-JP"]
+check(AppleIntelligence.offLanguage(system: "en-GB", current: "de_DE", installed: [], supported: siriSpeaks) == "de-DE"
+      && AppleIntelligence.offLanguage(system: "en-GB", current: "en-GB", installed: ["en-US", "fr-FR"], supported: siriSpeaks) == "fr-FR"
+      && AppleIntelligence.offLanguage(system: "en-GB", current: "en-GB", installed: [], supported: siriSpeaks) == "es-ES"
+      && AppleIntelligence.offLanguage(system: "de-DE", current: nil, installed: ["it-IT"], supported: siriSpeaks) == "en-US"
+      && AppleIntelligence.offLanguage(system: "en-GB", current: "en-GB", installed: [], supported: nil) == "es-ES"
+      && AppleIntelligence.offLanguage(system: "en-US", current: "en-US", installed: [], supported: ["en-US", "en-GB"]) == nil,
+      "picks a Siri language that switches Apple Intelligence off: the current one, then downloaded ones, then common ones")
+
+check(AppleIntelligence.eligibilityAnswer(in: ["OS_ELIGIBILITY_DOMAIN_SIRI_MODE": ["os_eligibility_answer_t": 2, "os_eligibility_answer_source_t": 1]]) == 2
+      && AppleIntelligence.eligibilityAnswer(in: ["OS_ELIGIBILITY_DOMAIN_SIRI_MODE": 4]) == 4
+      && AppleIntelligence.eligibilityAnswer(in: ["OS_ELIGIBILITY_DOMAIN_GREYMATTER": ["os_eligibility_answer_t": 4]]) == nil,
+      "reads macOS's answer on whether Apple Intelligence may run")
+
+func modelCatalogState(_ objects: [Any]?) -> Data {
+    var fields: [String: Any] = [:]
+    if let objects {
+        fields["setConfiguration"] = try? PropertyListSerialization.data(fromPropertyList: ["$archiver": "NSKeyedArchiver", "$objects": objects],
+                                                                        format: .binary, options: 0)
+    }
+    return (try? PropertyListSerialization.data(fromPropertyList: ["SUCorePersistedStatePolicySecureCodedObjectsFields": fields],
+                                                format: .binary, options: 0)) ?? Data()
+}
+check(AppleIntelligence.modelsSelected(in: modelCatalogState(["$null", "com.apple.fm.language.instruct_3b.base.generic_sparse"])) == true
+      && AppleIntelligence.modelsSelected(in: modelCatalogState(["$null", "com.apple.fm.vision.base"])) == false
+      && AppleIntelligence.modelsSelected(in: modelCatalogState(nil)) == false
+      && AppleIntelligence.modelsSelected(in: Data("not a property list".utf8)) == nil,
+      "tells whether the model catalog still holds Apple Intelligence's language model")
+
+/// Siri's settings and macOS's answers, played by the checks. Eligibility catches up with a change of Siri's
+/// language on the `delay`th read after it.
+final class FakeSiri: SiriEnvironment {
+    enum Eligibility { case follows(delay: Int), stuck(Int), unreadable }
+    struct Refused: Error {}
+
+    var system: String? = "en-GB"
+    var siri: String?
+    var voice: Data? = Data([1, 2, 3])
+    var saved: SavedSiri?
+    var supported = ["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "ja-JP"]
+    var installed: [String] = []
+    var eligibility: Eligibility
+    var answer: Int
+    var pending: (answer: Int, reads: Int)?
+    var failing: Set<String> = []
+    var failSave = false
+    var virtual = false
+    var events: [String] = []
+    var sleeps: [Double] = []
+
+    init(siri: String, _ eligibility: Eligibility) {
+        self.siri = siri
+        self.eligibility = eligibility
+        answer = AppleIntelligence.baseLanguage(siri) == "en" ? 4 : 2
+    }
+
+    func systemLanguage() -> String? { system }
+    func siriLanguage() -> String? { siri }
+    func siriEnabled() -> Bool? { false }
+    func outputVoice() -> Data? { voice }
+    func supportedLanguages() -> [String]? { supported }
+    func installedSiriLanguages() -> [String] { installed }
+    func eligibilityAnswer() -> Int? {
+        switch eligibility {
+        case .unreadable: return nil
+        case .stuck(let fixed): return fixed
+        case .follows:
+            if let next = pending { if next.reads <= 1 { answer = next.answer; pending = nil } else { pending = (next.answer, next.reads - 1) } }
+            return answer
+        }
+    }
+    func write(siriLanguage: String, outputVoice: Data?) throws {
+        events.append("write \(siriLanguage)" + (outputVoice == nil ? "" : " with voice"))
+        guard !failing.contains(siriLanguage) else { throw Refused() }
+        siri = siriLanguage
+        if let outputVoice { voice = outputVoice }
+        if case .follows(let delay) = eligibility {
+            pending = (AppleIntelligence.baseLanguage(siriLanguage) == AppleIntelligence.baseLanguage(system ?? "") ? 4 : 2, delay)
+        }
+    }
+    func loadSaved() -> SavedSiri? { saved }
+    func save(_ saved: SavedSiri?) throws {
+        events.append(saved.map { "save \($0.siriLanguage)" } ?? "forget")
+        if failSave { throw Refused() }
+        self.saved = saved
+    }
+    func sleep(_ seconds: Double) { sleeps.append(seconds) }
+    func isVirtualMachine() -> Bool { virtual }
+}
+
+func purger(_ fake: FakeSiri) -> () -> CacheDelete.PurgeResult {
+    { fake.events.append("purge"); return CacheDelete.PurgeResult(service: CacheDelete.Service.macOSDownloads.rawValue, reported: 12_000_000_000) }
+}
+var steps: [String] = []
+
+let switchingOff = FakeSiri(siri: "en-GB", .follows(delay: 3))
+switchingOff.installed = ["de-DE"]
+let switchedOff = AppleIntelligenceSwitch.turnOff(switchingOff, purge: purger(switchingOff)) { steps.append($0) }
+check(switchedOff.done && switchedOff.error == nil && switchedOff.siriLanguage == "de-DE" && switchedOff.purge?.reported == 12_000_000_000
+      && switchingOff.events == ["save en-GB", "write de-DE", "purge"] && switchingOff.saved?.siriLanguage == "en-GB"
+      && switchingOff.saved?.outputVoice == Data([1, 2, 3]) && switchingOff.sleeps == [1, 1, 15]
+      && steps.contains("Switching Siri to German (Germany)…") && steps.last == "Asking macOS to delete them…",
+      "switches Apple Intelligence off through Siri's language, saving Siri's settings first (\(switchingOff.events), \(switchingOff.sleeps), \(steps))")
+
+let stubborn = FakeSiri(siri: "en-GB", .stuck(4))
+let stubbornOutcome = AppleIntelligenceSwitch.turnOff(stubborn, purge: purger(stubborn)) { _ in }
+check(!stubbornOutcome.done && stubbornOutcome.error?.hasPrefix("macOS still lets Apple Intelligence run with Siri in Spanish (Spain).") == true
+      && stubborn.events == ["save en-GB", "write es-ES", "write en-GB with voice", "forget"] && stubborn.siri == "en-GB" && stubborn.saved == nil
+      && stubborn.sleeps == Array(repeating: 1, count: 8),
+      "puts Siri back as it was when macOS keeps Apple Intelligence on (\(stubborn.events))")
+
+let blindOff = FakeSiri(siri: "en-GB", .unreadable)
+let blindOffOutcome = AppleIntelligenceSwitch.turnOff(blindOff, purge: purger(blindOff)) { _ in }
+check(blindOffOutcome.done && blindOff.sleeps == [8, 15] && blindOff.events.last == "purge",
+      "waits a fixed time when it can't ask macOS (\(blindOff.sleeps))")
+
+let refusedOff = FakeSiri(siri: "en-GB", .follows(delay: 1))
+refusedOff.failing = ["es-ES"]
+let refusedOffOutcome = AppleIntelligenceSwitch.turnOff(refusedOff, purge: purger(refusedOff)) { _ in }
+check(!refusedOffOutcome.done && refusedOffOutcome.error == "macOS didn't accept the new Siri language. Siri is as it was."
+      && refusedOff.events == ["save en-GB", "write es-ES", "write en-GB with voice", "forget"] && refusedOff.siri == "en-GB",
+      "undoes a change of Siri's language that macOS refused")
+
+let unsaved = FakeSiri(siri: "en-GB", .follows(delay: 1))
+unsaved.failSave = true
+let unsavedOutcome = AppleIntelligenceSwitch.turnOff(unsaved, purge: purger(unsaved)) { _ in }
+check(!unsavedOutcome.done && unsaved.events == ["save en-GB"] && unsaved.siri == "en-GB", "changes nothing when Siri's settings can't be saved first")
+
+let backOn = FakeSiri(siri: "de-DE", .follows(delay: 1))
+backOn.voice = nil
+backOn.saved = SavedSiri(siriLanguage: "en-GB", outputVoice: Data([1, 2, 3]), savedAt: Date())
+let backOnOutcome = AppleIntelligenceSwitch.turnOn(backOn)
+check(backOnOutcome.done && backOn.siri == "en-GB" && backOn.voice == Data([1, 2, 3]) && backOn.saved == nil
+      && backOn.events == ["write en-GB with voice", "forget"],
+      "switches Apple Intelligence back on with Siri's saved language and voice, then forgets them")
+let followOn = FakeSiri(siri: "de-DE", .follows(delay: 1))
+followOn.system = "en-NZ"
+let followOnOutcome = AppleIntelligenceSwitch.turnOn(followOn)
+check(followOnOutcome.done && followOnOutcome.siriLanguage == "en-US" && followOn.events == ["write en-US"],
+      "without saved settings, sets Siri to the language closest to the Mac's")
+
+let held = FakeSiri(siri: "de-DE", .follows(delay: 2))
+steps = []
+let released = AppleIntelligenceSwitch.release(held, purge: purger(held)) { steps.append($0) }
+check(released.done && released.siriLanguage == "de-DE" && held.siri == "de-DE" && held.events == ["write en-GB", "write de-DE with voice", "purge"]
+      && held.sleeps == [1, 20, 1, 15] && steps.first == "Switching Siri to English (UK) for a moment…",
+      "gets macOS to let go of models it still holds, and puts Siri back (\(held.events), \(held.sleeps))")
+
+let neverAvailable = FakeSiri(siri: "de-DE", .stuck(2))
+let neverReleased = AppleIntelligenceSwitch.release(neverAvailable, purge: purger(neverAvailable)) { _ in }
+check(!neverReleased.done && neverAvailable.siri == "de-DE" && !neverAvailable.events.contains("purge")
+      && neverReleased.error == "macOS didn't make Apple Intelligence available, so it can't let go of the models. Siri is back as it was.",
+      "puts Siri back when macOS never makes Apple Intelligence available")
+
+let blindRelease = FakeSiri(siri: "de-DE", .unreadable)
+let blindReleased = AppleIntelligenceSwitch.release(blindRelease, purge: purger(blindRelease)) { _ in }
+check(blindReleased.done && blindRelease.sleeps == [30, 20, 30, 15] && blindRelease.siri == "de-DE",
+      "releases on fixed waits when it can't ask macOS (\(blindRelease.sleeps))")
+
+let refusedRelease = FakeSiri(siri: "de-DE", .follows(delay: 1))
+refusedRelease.failing = ["en-GB"]
+let refusedReleased = AppleIntelligenceSwitch.release(refusedRelease, purge: purger(refusedRelease)) { _ in }
+check(!refusedReleased.done && refusedReleased.error == "macOS didn't accept the change. Siri is back as it was."
+      && refusedRelease.events == ["write en-GB", "write de-DE with voice"] && refusedRelease.siri == "de-DE",
+      "puts Siri back when macOS refuses the brief switch")
+
+let alreadyOn = FakeSiri(siri: "en-US", .stuck(4))
+let alreadyOnOutcome = AppleIntelligenceSwitch.release(alreadyOn, purge: purger(alreadyOn)) { _ in }
+check(alreadyOnOutcome.error?.hasSuffix("Switch it off first.") == true && alreadyOn.events.isEmpty, "changes nothing while Apple Intelligence is on")
+
+let virtualMac = FakeSiri(siri: "en-GB", .stuck(2))
+virtualMac.virtual = true
+let virtualOff = AppleIntelligenceSwitch.turnOff(virtualMac, purge: purger(virtualMac)) { _ in }
+let virtualRelease = AppleIntelligenceSwitch.release(virtualMac, purge: purger(virtualMac)) { _ in }
+check(!virtualOff.done && !virtualRelease.done && virtualMac.events.isEmpty && virtualOff.error?.contains("virtual machine") == true,
+      "leaves Siri alone in a virtual machine")
+
+// MARK: macOS's downloads and what keeps them
+
+let assetFolders: [String: SystemAsset.Feature] = [
+    "com_apple_MobileAsset_UAF_Siri_UnderstandingASRHammer": .siriSpeech, "com_apple_MobileAsset_SpeechEndpointMacOSAssets": .siriSpeech,
+    "com_apple_MobileAsset_TTSAXResourceModelAssets": .voices, "com_apple_MobileAsset_MacinTalkVoiceAssets": .voices,
+    "com_apple_MobileAsset_VoiceServices_CombinedVocalizerVoices": .voices, "com_apple_MobileAsset_UAF_FM_GenerativeModels": .appleIntelligence,
+    "com_apple_MobileAsset_UAF_FM_Visual": .appleIntelligence, "com_apple_MobileAsset_UAF_IF_Planner": .appleIntelligence,
+    "com_apple_MobileAsset_UAF_Siri_AnswerSynthesis": .appleIntelligence, "com_apple_MobileAsset_UAF_Photos_SpatialPhotosRelive": .photos,
+    "com_apple_MobileAsset_UAF_LinguisticData": .languageData, "com_apple_MobileAsset_LinguisticData": .languageData,
+    "com_apple_MobileAsset_UAF_Translation_Assets": .languageData, "com_apple_MobileAsset_MetalToolchain": .metal,
+    "com_apple_MobileAsset_DictionaryServices_dictionary3macOS": .dictionaries, "com_apple_MobileAsset_Font7": .fonts,
+    "com_apple_MobileAsset_MobileSoftwareUpdate_MacUpdateBrain": .updates
+]
+let misfiled = assetFolders.filter { SystemAsset.Feature.of($0.key) != $0.value }.map(\.key)
+check(misfiled.isEmpty, "knows which feature each of macOS's asset folders serves (\(misfiled))")
+
+let assetsRoot = folder("assets")
+write("assets/com_apple_MobileAsset_UAF_Siri_Understanding/a/model.bin", bytes: 1_200_000)
+write("assets/com_apple_MobileAsset_MetalToolchain/x.bin", bytes: 10_000)
+write("assets/com_apple_MobileAsset_UAF_FM_GenerativeModels/sealed/model.bin", bytes: 10_000)
+let sealed = assetsRoot.appendingPathComponent("com_apple_MobileAsset_UAF_FM_GenerativeModels/sealed")
+chmod(sealed.path, 0)
+let measuredAssets = SystemAssets.measure(root: assetsRoot)
+chmod(sealed.path, 0o755)
+check(measuredAssets.map(\.feature) == [.appleIntelligence, .siriSpeech] && measuredAssets.first?.hidden == true
+      && measuredAssets.first?.measurable == false && (measuredAssets.last?.bytes ?? 0) >= 1_200_000 && measuredAssets.last?.hidden == false,
+      "keeps downloads macOS won't let Spare measure, and leaves out tiny ones (\(measuredAssets.map(\.feature.rawValue)))")
+
+let subscriptions = [
+    ("com.apple.siri.embeddedspeech", "assistant.de_DE"), ("com.apple.siri.embeddedspeech", "assistant.en_GB"),
+    ("com.apple.siri.embeddedspeech", "hammer.en_US"), ("com.apple.siri.tts", "com.apple.siri.tts.voice.de_DE.de-DE-D.neural.premium"),
+    ("com.apple.ProofReader", "com.apple.ProofReader.LinguisticData.de.DataDeliveryService_0"),
+    ("com.apple.ProofReader", "com.apple.ProofReader.LinguisticData.mul_Latn.DataDeliveryService_0"),
+    ("com.apple.DictionaryServices", "com.apple.DictionaryServices;en_US;com.apple.dictionary.NOAD.DataDeliveryService_0"),
+    ("com.apple.DictionaryServices", "com.apple.DictionaryServices;en_GB;com.apple.dictionary.NOAD.DataDeliveryService_1"),
+    ("com.apple.DictionaryServices", "com.apple.DictionaryServices;de_DE;com.apple.dictionary.Duden.DataDeliveryService_0"),
+    ("com.apple.mediaanalysisd", "photos.spatial.relive"), ("com.apple.handwritingd", "handwriting.synthesis.en"),
+    ("com.apple.intelligence.summarizationkit", "summarization.base"), ("model-catalog", "safety.guardrail")
+].map { AssetSubscriptions.Subscription(client: $0.0, name: $0.1) }
+func holder(_ feature: SystemAsset.Feature, _ list: [AssetSubscriptions.Subscription] = subscriptions) -> String? {
+    AssetSubscriptions.holder(of: feature, in: list, siriLanguage: "de-DE", systemLanguage: "en-GB")
+}
+check(holder(.siriSpeech) == "Kept for Siri in German and English, even with Siri off." && holder(.voices) == "Kept for Siri's voices in German."
+      && holder(.languageData) == "Kept for spelling and typing suggestions in German."
+      && holder(.dictionaries) == "Kept for 2 dictionaries in the Dictionary app." && holder(.photos) == "Kept for Photos."
+      && holder(.appleIntelligence) == "Kept for Apple Intelligence's handwriting, summaries and safety checks."
+      && holder(.updates) == nil && holder(.siriSpeech, []) == nil,
+      "says what keeps each kind of macOS download (\(holder(.siriSpeech) ?? "nil"))")
+check(AssetSubscriptions.siriLanguages(in: subscriptions) == ["de-DE", "en-GB"], "finds the languages Siri keeps speech models for")
+
+let subscriptionsFile = folder("asset subscriptions").appendingPathComponent("UAF Subscriptions.db")
+var database: OpaquePointer?
+if sqlite3_open(subscriptionsFile.path, &database) == SQLITE_OK {
+    sqlite3_exec(database, """
+        CREATE TABLE Subscriptions (k0 TEXT, k1 TEXT, k4 TEXT);
+        INSERT INTO Subscriptions VALUES ('com.apple.siri.embeddedspeech', 'assistant.fr_FR', 'u1'), ('com.apple.siri.embeddedspeech', 'assistant.fr_FR', 'u2'),
+            ('com.apple.DictionaryServices', 'com.apple.DictionaryServices;en_US;com.apple.dictionary.NOAD.DataDeliveryService_0', 'u1');
+        """, nil, nil, nil)
+}
+sqlite3_close(database)
+let storedSubscriptions = AssetSubscriptions.live(database: subscriptionsFile.path)
+check(storedSubscriptions == [AssetSubscriptions.Subscription(client: "com.apple.DictionaryServices", name: "com.apple.DictionaryServices;en_US;com.apple.dictionary.NOAD.DataDeliveryService_0"),
+                              AssetSubscriptions.Subscription(client: "com.apple.siri.embeddedspeech", name: "assistant.fr_FR")]
+      && AssetSubscriptions.live(database: root.appendingPathComponent("missing.db").path) == nil,
+      "reads macOS's subscriptions database read-only, each subscription once")
+
+// MARK: Update leftovers
+
+let installData = folder("install data")
+write("install data/UpdateBundle/AssetData/payload.bin", bytes: 50_000)
+write("install data/InstallAssistant.pkg.integrityDataV1", bytes: 1_000)
+write("install data/Locked Files/BridgeOS.bundle", bytes: 1_000)
+let sproduct: [String: Any] = ["Packages": [["Identifier": "com.apple.pkg.InstallAssistant.macOSSequoia", "Version": "24.6.231",
+                                             "Size": 15_653_022_048, "URL": "InstallAssistant.pkg"]]]
+(sproduct as NSDictionary).write(to: installData.appendingPathComponent("index.sproduct"), atomically: true)
+let lastYear = Date().addingTimeInterval(-400 * 86_400)
+for item in [installData] + (try fm.contentsOfDirectory(at: installData, includingPropertiesForKeys: nil)) {
+    try fm.setAttributes([.modificationDate: lastYear], ofItemAtPath: item.path)
+}
+let installedAfter = text("systems/after/SystemVersion.plist", "<plist/>")
+let installedBefore = text("systems/before/SystemVersion.plist", "<plist/>")
+try fm.setAttributes([.modificationDate: Date().addingTimeInterval(-800 * 86_400)], ofItemAtPath: installedBefore.path)
+let leftover = UpdateLeftovers.find(folder: installData, systemVersion: installedAfter)
+let waiting = UpdateLeftovers.find(folder: installData, systemVersion: installedBefore)
+check(leftover?.isLeftover == true && waiting?.isLeftover == false && leftover?.product == "macOS Sequoia installer (24.6.231)"
+      && Set(leftover?.items.map(\.lastPathComponent) ?? []) == ["UpdateBundle", "InstallAssistant.pkg.integrityDataV1", "index.sproduct"]
+      && (leftover?.bytes ?? 0) >= 50_000 && leftover?.downloaded != nil,
+      "finds what an update left behind without touching Locked Files, and tells it from an update still waiting")
+check(UpdateLeftovers.find(folder: root.appendingPathComponent("no install data")) == nil, "finds nothing without the folder")
+check(UpdateLeftovers.productName(["Packages": [["Identifier": "com.apple.pkg.InstallAssistant.macOSBigSur", "Version": "20.6"]]]) == "macOS Big Sur installer (20.6)"
+      && UpdateLeftovers.productName(["Packages": [["Identifier": "com.apple.pkg.macOSBrain", "Version": "26.1"]]]) == "macOS update (26.1)"
+      && UpdateLeftovers.productName([:]) == nil,
+      "names the macOS an update was for")
+
+// MARK: Cloud downloads
+
+check(CloudDownloads.providerName("OneDrive-Personal") == "OneDrive (Personal)"
+      && CloudDownloads.providerName("GoogleDrive-anna@example.com") == "Google Drive (anna@example.com)"
+      && CloudDownloads.providerName("Dropbox") == "Dropbox" && CloudDownloads.providerName("Box-Box") == "Box"
+      && CloudDownloads.containerName("57T9237FN3~net~whatsapp~WhatsApp") == "WhatsApp" && CloudDownloads.containerName("iCloud~md~obsidian") == "Obsidian"
+      && CloudDownloads.containerName("com~apple~CloudDocs") == "iCloud Drive",
+      "names cloud providers and iCloud's app folders")
+let cloudHome = folder("cloudhome")
+let keptOnMac = write("cloudhome/Library/CloudStorage/OneDrive-Personal/Documents/report.pdf", bytes: 20_000)
+write("cloudhome/Library/Mobile Documents/com~apple~CloudDocs/Desktop/note.txt", bytes: 20_000)
+write("cloudhome/Library/Mobile Documents/57T9237FN3~net~whatsapp~WhatsApp/Accounts/backup.bin", bytes: 20_000)
+let keptAttributes = CloudDownloads.attributes(of: keptOnMac.path)
+check(CloudDownloads.scan(home: cloudHome, cancel: Cancellation()).isEmpty
+      && CloudDownloads.removeDownloads(under: cloudHome.appendingPathComponent("Library"), cancel: Cancellation()) == CloudDownloads.Removal()
+      && keptAttributes?.purgeable == false && keptAttributes?.allocated == blocks(keptOnMac.path),
+      "finds no downloads among files kept on this Mac, and removes none")
+
+// MARK: Simulators and Docker
+
+let simulatorDevices = Data(#"""
+{"devices": {
+  "com.apple.CoreSimulator.SimRuntime.iOS-18-2": [
+    {"lastBootedAt": "2026-09-30T08:12:44Z", "dataPath": "/Users/x/Library/Developer/CoreSimulator/Devices/A1/data", "dataPathSize": 2147483648,
+     "logPath": "/Users/x/Library/Logs/CoreSimulator/A1", "udid": "A1", "isAvailable": true, "logPathSize": 4096,
+     "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro", "state": "Shutdown", "name": "iPhone 16 Pro"}],
+  "com.apple.CoreSimulator.SimRuntime.xrOS-2-0": [
+    {"dataPath": "/Users/x/Library/Developer/CoreSimulator/Devices/B2/data", "dataPathSize": 1048576, "udid": "B2", "isAvailable": false,
+     "availabilityError": "runtime profile not found", "state": "Shutdown", "name": "Apple Vision Pro", "lastBootedAt": "2025-02-01T10:00:00.123Z",
+     "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.Apple-Vision-Pro"}],
+  "com.apple.CoreSimulator.SimRuntime.watchOS-11-1": []
+}}
+"""#.utf8)
+let devices = Simulators.devices(json: simulatorDevices)
+check(devices.map(\.name) == ["iPhone 16 Pro", "Apple Vision Pro"] && devices[0].runtime == "iOS 18.2" && devices[0].isAvailable
+      && devices[0].bytes == 2_147_483_648 && devices[0].dataURL?.lastPathComponent == "data" && devices[0].lastBooted != nil
+      && devices[1].runtime == "visionOS 2.0" && !devices[1].isAvailable && devices[1].problem == "runtime profile not found" && devices[1].lastBooted != nil,
+      "reads Xcode's simulators")
+let simulatorRuntimes = Data(#"""
+{"6E5B4C3A-0000-4000-8000-000000000001": {"build": "22C150", "deletable": true, "identifier": "6E5B4C3A-0000-4000-8000-000000000001",
+   "kind": "Disk Image", "lastUsedAt": "2026-09-30T08:12:44Z", "platformIdentifier": "com.apple.platform.iphonesimulator",
+   "runtimeIdentifier": "com.apple.CoreSimulator.SimRuntime.iOS-18-2", "sizeBytes": 8682459843, "state": "Ready", "version": "18.2"},
+ "6E5B4C3A-0000-4000-8000-000000000002": {"build": "21R355", "deletable": false, "identifier": "6E5B4C3A-0000-4000-8000-000000000002",
+   "kind": "Bundled with Xcode", "platformIdentifier": "com.apple.platform.watchsimulator", "sizeBytes": 3400000000, "state": "Ready", "version": "10.0"}}
+"""#.utf8)
+let runtimes = Simulators.runtimes(json: simulatorRuntimes)
+check(runtimes.map(\.name) == ["iOS 18.2", "watchOS 10.0"] && runtimes[0].bytes == 8_682_459_843 && runtimes[0].deletable && runtimes[0].build == "22C150"
+      && runtimes[0].lastUsed != nil && runtimes[0].identifier == "6E5B4C3A-0000-4000-8000-000000000001"
+      && runtimes[1].kind == "Bundled with Xcode" && !runtimes[1].deletable,
+      "reads Xcode's simulator runtimes")
+check(Simulators.runtimeName("com.apple.CoreSimulator.SimRuntime.tvOS-17-4") == "tvOS 17.4"
+      && Simulators.runtimeName("com.apple.CoreSimulator.SimRuntime.xrOS-1-0") == "visionOS 1.0" && Simulators.runtimeName("odd") == "odd",
+      "names simulator runtimes")
+
+let dockerUsage = Docker.usage(lines: """
+    {"Active":"2","Reclaimable":"1.2GB (45%)","Size":"2.66GB","TotalCount":"5","Type":"Images"}
+    {"Active":"1","Reclaimable":"0B (0%)","Size":"12.3kB","TotalCount":"3","Type":"Containers"}
+    {"Active":"0","Reclaimable":"512.4MB","Size":"512.4MB","TotalCount":"21","Type":"Build Cache"}
+    WARNING: not JSON
+    """)
+check(dockerUsage.count == 3 && dockerUsage[0] == Docker.Usage(kind: "Images", count: 5, active: 2, bytes: 2_660_000_000, reclaimable: 1_200_000_000)
+      && dockerUsage[1].bytes == 12_300 && dockerUsage[1].reclaimable == 0 && dockerUsage[2].reclaimable == 512_400_000,
+      "reads what Docker's images, containers and build cache take")
+check(Docker.bytes("1.23GB") == 1_230_000_000 && Docker.bytes("512.4MB (40%)") == 512_400_000 && Docker.bytes("0B") == 0
+      && Docker.bytes("1.2kB") == 1_200 && Docker.bytes("1.5GiB") == 1_610_612_736 && Docker.bytes("N/A") == nil && Docker.bytes("3 parsecs") == nil,
+      "reads the sizes Docker prints")
+let dockerHome = folder("dockerhome")
+write("dockerhome/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw", bytes: 30_000)
+write("dockerhome/.colima/_lima/colima-dev/diffdisk", bytes: 20_000)
+write("dockerhome/.local/share/containers/podman/machine/applehv/podman-machine-default-arm64.raw", bytes: 10_000)
+write("dockerhome/.orbstack/data/data.img", bytes: 0)
+let diskImages = Docker.diskImages(home: dockerHome)
+check(diskImages.map(\.app) == ["Docker Desktop", "Colima (dev)", "Podman"] && diskImages.first.map { $0.bytes == blocks($0.url.path) } == true,
+      "finds the virtual disks of Docker Desktop, Colima and Podman by the space they take")
+
+// MARK: Browser extensions
+
+let browserHome = folder("browserhome")
+let chrome = "browserhome/Library/Application Support/Google/Chrome"
+text("\(chrome)/Local State", #"{"profile": {"info_cache": {"Default": {"name": "Personal"}, "Profile 1": {"name": "Work"}}}}"#)
+text("\(chrome)/Default/Preferences", #"{"extensions": {"settings": {"aaaa": {"state": 1}}}}"#)
+text("\(chrome)/Default/Secure Preferences", #"{"extensions": {"settings": {"bbbb": {"disable_reasons": [1]}}}}"#)
+text("\(chrome)/Default/Extensions/aaaa/1.9.0_0/manifest.json",
+     #"{"name": "__MSG_appName__", "default_locale": "en", "version": "1.9.0", "update_url": "https://clients2.google.com/service/update2/crx"}"#)
+text("\(chrome)/Default/Extensions/aaaa/1.9.0_0/_locales/en/messages.json", #"{"appName": {"message": "Old Helper"}}"#)
+text("\(chrome)/Default/Extensions/aaaa/1.10.0_0/manifest.json", #"""
+    {"name": "__MSG_appName__", "default_locale": "en", "version": "1.10.0", "update_url": "https://clients2.google.com/service/update2/crx",
+     "content_scripts": [{"matches": ["<all_urls>"], "js": ["page.js"]}]}
+    """#)
+text("\(chrome)/Default/Extensions/aaaa/1.10.0_0/_locales/en/messages.json", "\u{FEFF}" + #"{"APPNAME": {"message": "Page Helper"}}"#)
+text("\(chrome)/Default/Extensions/bbbb/2.0_0/manifest.json", #"{"name": "Side Tool", "version": "2.0", "host_permissions": ["https://example.com/*"]}"#)
+text("\(chrome)/Default/Extensions/cccc/1.0_0/manifest.json", #"{"version": "1.0", "description": "A helper without a name"}"#)
+text("\(chrome)/Profile 1/Preferences", "{}")
+text("\(chrome)/Profile 1/Extensions/dddd/3.1_0/manifest.json",
+     #"{"name": "Everywhere", "version": "3.1", "permissions": ["https://*/*", "tabs"], "update_url": "https://updates.example.com/x.xml"}"#)
+text("browserhome/Library/Application Support/com.operasoftware.Opera/Preferences", "{}")
+text("browserhome/Library/Application Support/com.operasoftware.Opera/Extensions/eeee/1.0_0/manifest.json",
+     #"{"name": "Opera Thing", "version": "1.0", "update_url": "https://extension-updates.opera.com/api/omaha/update/"}"#)
+let chromiumExtensions = BrowserExtensions.chromium(home: browserHome)
+let chromiumByID = Dictionary(chromiumExtensions.map { ($0.extensionID, $0) }) { first, _ in first }
+let pageHelper = chromiumByID["aaaa"], sideTool = chromiumByID["bbbb"], everywhere = chromiumByID["dddd"], operaThing = chromiumByID["eeee"]
+check(chromiumExtensions.count == 4 && chromiumByID["cccc"] == nil
+      && pageHelper?.name == "Page Helper" && pageHelper?.version == "1.10.0" && pageHelper?.allSites == true && pageHelper?.enabled == true
+      && pageHelper?.fromStore == true && pageHelper?.profile == "Personal" && pageHelper?.browser == .chrome && (pageHelper?.bytes ?? 0) > 0
+      && pageHelper?.id == "Google Chrome|Personal|aaaa"
+      && sideTool?.enabled == false && sideTool?.allSites == false && sideTool?.fromStore == nil
+      && everywhere?.profile == "Work" && everywhere?.allSites == true && everywhere?.fromStore == false && everywhere?.enabled == nil
+      && operaThing?.browser == .opera && operaThing?.profile == nil && operaThing?.fromStore == true,
+      "reads Chromium browsers' extensions: newest version, translated name, site access, store and on or off (\(chromiumExtensions.map(\.name)))")
+
+let firefoxSupport = "browserhome/Library/Application Support/Firefox"
+text("\(firefoxSupport)/profiles.ini", "[Profile0]\nName=default-release\nIsRelative=1\nPath=Profiles/x1y2z3.default-release\nDefault=1\n\n[General]\nStartWithLastProfile=1\n")
+let xpi = write("\(firefoxSupport)/Profiles/x1y2z3.default-release/extensions/blocker@example.org.xpi", bytes: 30_000)
+text("\(firefoxSupport)/Profiles/x1y2z3.default-release/extensions.json", """
+    {"schemaVersion": 36, "addons": [
+     {"id": "blocker@example.org", "type": "extension", "location": "app-profile", "version": "1.62.0", "active": true, "path": "\(xpi.path)",
+      "defaultLocale": {"name": "Blocker"}, "signedState": 2, "installTelemetryInfo": {"source": "amo"},
+      "userPermissions": {"permissions": ["storage"], "origins": ["<all_urls>"]}},
+     {"id": "side@example.org", "type": "extension", "location": "app-profile", "version": "0.3", "active": false, "path": "/nowhere/side.xpi",
+      "defaultLocale": {"name": "Sideloaded"}, "signedState": 0, "installTelemetryInfo": {"source": "file-url"},
+      "userPermissions": {"origins": ["https://example.com/*"]}},
+     {"id": "formautofill@mozilla.org", "type": "extension", "location": "app-builtin", "defaultLocale": {"name": "Form Autofill"}},
+     {"id": "langpack-de@firefox.mozilla.org", "type": "locale", "location": "app-profile", "defaultLocale": {"name": "Deutsch"}}
+    ]}
+    """)
+let firefoxExtensions = BrowserExtensions.firefox(home: browserHome)
+check(firefoxExtensions.map(\.name) == ["Blocker", "Sideloaded"] && firefoxExtensions[0].profile == "default-release"
+      && firefoxExtensions[0].allSites && firefoxExtensions[0].fromStore == true && firefoxExtensions[0].enabled == true
+      && firefoxExtensions[0].bytes == blocks(xpi.path) && firefoxExtensions[0].browser == .firefox
+      && firefoxExtensions[1].enabled == false && firefoxExtensions[1].fromStore == false && !firefoxExtensions[1].allSites && firefoxExtensions[1].bytes == nil,
+      "reads the extensions people added to Firefox, leaving out Firefox's own")
+
+// pluginkit's output on a real Mac, with the apps moved into the temporary folder, plus a few made-up entries.
+let apps = root.appendingPathComponent("Apps").path
+text("Apps/Bitwarden.app/Contents/PlugIns/safari.appex/Contents/Resources/manifest.json",
+     #"{"name": "__MSG_extName__", "default_locale": "en", "permissions": ["<all_urls>", "storage"]}"#)
+text("Apps/Bitwarden.app/Contents/_MASReceipt/receipt", "receipt")
+text("Apps/Reader.app/Contents/PlugIns/Extension.appex/Contents/Resources/manifest.json",
+     #"{"name": "__MSG_extension_name__", "default_locale": "en", "host_permissions": ["https://example.com/*"]}"#)
+text("Apps/Reader.app/Contents/PlugIns/Extension.appex/Contents/Resources/_locales/en/messages.json", #"{"extension_name": {"message": "Reader Mode"}}"#)
+let legacyInfo: NSDictionary = ["NSExtension": ["NSExtensionPointIdentifier": "com.apple.Safari.extension", "SFSafariWebsiteAccess": ["Level": "All"]]]
+folder("Apps/Legacy.app/Contents/PlugIns/Legacy.appex/Contents")
+legacyInfo.write(to: root.appendingPathComponent("Apps/Legacy.app/Contents/PlugIns/Legacy.appex/Contents/Info.plist"), atomically: true)
+let pluginkitSample = """
+         com.bitwarden.desktop.safari(2026.9.0)
+    \t            Path = /Applications/Bitwarden.app/Contents/PlugIns/safari.appex
+    \t            UUID = E9E184FB-84AD-468A-8CEC-CE982A496253
+    \t       Timestamp = 2026-09-28 14:54:44 +0000
+    \t             SDK = com.apple.Safari.web-extension
+    \t   Parent Bundle = /Applications/Bitwarden.app
+    \t    Display Name = Bitwarden
+    \t      Short Name = Bitwarden
+    \t     Parent Name = Bitwarden
+    \t        Platform = macOS
+
+    +    com.example.reader.Extension(1.4)
+    \t            Path = /Applications/Reader.app/Contents/PlugIns/Extension.appex
+    \t             SDK = com.apple.Safari.web-extension
+    \t   Parent Bundle = /Applications/Reader.app
+    \t    Display Name = Extension
+    \t     Parent Name = Reader
+
+    -    com.example.blocker.Rules(2.0)
+    \t            Path = /Applications/Blocker.app/Contents/PlugIns/Rules.appex
+    \t             SDK = com.apple.Safari.content-blocker
+    \t   Parent Bundle = /Applications/Blocker.app
+    \t    Display Name = Blocker Rules
+    \t     Parent Name = Blocker
+
+         com.example.legacy(1.0)
+    \t            Path = /Applications/Legacy.app/Contents/PlugIns/Legacy.appex
+    \t             SDK = com.apple.Safari.extension
+    \t   Parent Bundle = /Applications/Legacy.app
+    \t    Display Name = Legacy Helper
+    \t     Parent Name = Legacy
+
+         com.example.reader.Extension(1.2)
+    \t            Path = /Old/Reader.app/Contents/PlugIns/Extension.appex
+    \t             SDK = com.apple.Safari.web-extension
+    \t    Display Name = Extension
+    \t     Parent Name = Reader
+
+     (5 plug-ins)
+    """.replacingOccurrences(of: "/Applications/", with: apps + "/")
+let safariExtensions = BrowserExtensions.safari(pluginkit: pluginkitSample)
+let safariByID = Dictionary(safariExtensions.map { ($0.extensionID, $0) }) { first, _ in first }
+let bitwarden = safariByID["com.bitwarden.desktop.safari"], reader = safariByID["com.example.reader.Extension"]
+check(safariExtensions.count == 4 && bitwarden?.name == "Bitwarden" && bitwarden?.version == "2026.9.0" && bitwarden?.enabled == nil
+      && bitwarden?.allSites == true && bitwarden?.fromStore == true && bitwarden?.containingApp?.lastPathComponent == "Bitwarden.app"
+      && bitwarden?.url?.lastPathComponent == "safari.appex" && (bitwarden?.bytes ?? 0) > 0
+      && reader?.name == "Reader Mode" && reader?.version == "1.4" && reader?.enabled == true && reader?.fromStore == false && reader?.allSites == false
+      && safariByID["com.example.blocker.Rules"]?.enabled == false && safariByID["com.example.blocker.Rules"]?.fromStore == nil
+      && safariByID["com.example.blocker.Rules"]?.bytes == nil && safariByID["com.example.legacy"]?.allSites == true,
+      "reads Safari's extensions from pluginkit, with their apps, site access and on or off marks (\(safariExtensions.map(\.name)))")
+
+// MARK: Browser and app caches, Mail and Messages
+
+let supportHome = folder("supporthome")
+let slack = "supporthome/Library/Application Support/Slack"
+text("\(slack)/Network Persistent State", "{}")
+write("\(slack)/Cache/Cache_Data/data_1", bytes: 200_000)
+write("\(slack)/Code Cache/js/index", bytes: 100_000)
+write("\(slack)/Local Storage/leveldb/000003.log", bytes: 100_000)
+write("\(slack)/IndexedDB/https_app.slack.com_0.indexeddb.leveldb/000003.log", bytes: 100_000)
+text("supporthome/Library/Application Support/Code/Network Persistent State", "{}")
+write("supporthome/Library/Application Support/Code/CachedData/0a1b2c/chrome/js/data", bytes: 150_000)
+write("supporthome/Library/Application Support/Plain App/Cache/data.bin", bytes: 300_000)
+let chromeData = "supporthome/Library/Application Support/Google/Chrome"
+text("\(chromeData)/Local State", "{}")
+write("\(chromeData)/GrShaderCache/data_0", bytes: 100_000)
+text("\(chromeData)/Default/Network/Network Persistent State", "{}")
+write("\(chromeData)/Default/GPUCache/data_1", bytes: 150_000)
+write("\(chromeData)/Default/Service Worker/CacheStorage/abc/data", bytes: 100_000)
+let supportContext = ScanContext(home: supportHome, projectRoots: [], inactiveAfter: 0, fullDiskAccess: false, isOpen: { $0 == "Google" })
+let supportItems = Catalog.rule("app-support-caches")?.find(supportContext, Cancellation()) ?? []
+let supportByLabel = Dictionary(supportItems.map { ($0.label, $0) }) { first, _ in first }
+func cacheNames(_ label: String) -> Set<String> { Set(supportByLabel[label]?.urls.map(\.lastPathComponent) ?? []) }
+check(Set(supportByLabel.keys) == ["Slack", "Visual Studio Code", "Google Chrome"]
+      && cacheNames("Slack") == ["Cache", "Code Cache"] && supportByLabel["Slack"]?.suggested == true
+      && cacheNames("Visual Studio Code") == ["CachedData"] && cacheNames("Google Chrome") == ["GrShaderCache", "GPUCache"]
+      && supportByLabel["Google Chrome"]?.suggested == false && supportByLabel["Google Chrome"]?.detail == "Open now. Quit it first to clean this.",
+      "takes only the caches of Chromium browsers and Electron apps, never their data or another app's Cache folder (\(supportItems.map(\.label)))")
+
+let messagesHome = folder("messageshome")
+write("messageshome/Library/Messages/Attachments/ab/01/GUID-1/IMG_0001.MOV", bytes: 6_000_000)
+write("messageshome/Library/Messages/Attachments/cd/02/GUID-2/IMG_0002.HEIC", bytes: 1_000_000)
+write("messageshome/Library/Messages/Attachments/ef/03/GUID-3/Talk.pdf", bytes: 7_000_000)
+write("messageshome/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/UUID-1/Invoice.pdf", bytes: 30_000)
+write("messageshome/Library/Containers/com.apple.mail/Data/Library/Mail Downloads/UUID-2/Photo.jpg", bytes: 30_000)
+let withAccess = ScanContext(home: messagesHome, projectRoots: [], inactiveAfter: 0, fullDiskAccess: true)
+let withoutAccess = ScanContext(home: messagesHome, projectRoots: [], inactiveAfter: 0, fullDiskAccess: false)
+let attachments = Catalog.rule("messages-attachments")?.find(withAccess, Cancellation()) ?? []
+check(attachments.map(\.label) == ["Talk.pdf", "IMG_0001.MOV"] && attachments.allSatisfy { !$0.suggested && $0.detail?.hasPrefix("From ") == true },
+      "lists Messages attachments of 5 MB or more, largest first, never selected (\(attachments.map(\.label)))")
+let mailCopies = Catalog.rule("mail-downloads")?.find(withAccess, Cancellation()) ?? []
+check(mailCopies.count == 1 && mailCopies.first?.label == "2 attachments" && mailCopies.first?.urls.count == 2 && mailCopies.first?.suggested == true
+      && Catalog.rule("mail-downloads")?.find(withoutAccess, Cancellation()).isEmpty == true,
+      "offers Mail's copies of opened attachments as one item, with Full Disk Access only")
 
 // MARK: Catalog
 

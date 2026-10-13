@@ -168,7 +168,7 @@ struct ExtensionsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 if page.extensionCategories.count > 1 {
                     Picker("Show", selection: $category) {
                         Text("All (\(mine.count))").tag("All")
@@ -180,66 +180,18 @@ struct ExtensionsView: View {
                     .fixedSize()
                 }
                 Text((Extension.Category(rawValue: category) ?? (page.extensionCategories.count == 1 ? page.extensionCategories.first : nil))?.explanation ?? pageExplanation)
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
+                    .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 if mine.contains(where: { $0.item.origin == .macOS }) {
-                    Toggle("Hide macOS's own", isOn: $hideMacOS).toggleStyle(.checkbox).fixedSize()
+                    Toggle("Hide macOS's own", isOn: $hideMacOS).toggleStyle(SketchCheckStyle()).fixedSize()
                 }
             }
-            .padding(.horizontal, 18).padding(.vertical, 10)
-            Table(visible, selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("Name", value: \.name) { row in
-                    HStack(spacing: 8) {
-                        if let url = row.item.url { Image(nsImage: AppLookup.icon(for: url, size: 18)).frame(width: 18, height: 18) }
-                        else { Image(systemName: row.item.category.symbol).frame(width: 18).foregroundStyle(.secondary) }
-                        VStack(alignment: .leading, spacing: 0) {
-                            HStack(spacing: 5) { Text(row.name).lineLimit(1); OriginBadge(origin: row.item.origin) }
-                            if let note = row.item.note {
-                                Text(note).font(.system(size: 10.5)).lineLimit(1).truncationMode(.tail)
-                                    .foregroundStyle(row.item.category == .system && row.item.owner == nil && row.item.state != "Removed at restart" ? Color.orange : Color.secondary)
-                            } else if let detail = row.item.detail {
-                                Text(detail).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                            }
-                        }
-                    }
-                    .help([row.item.note, row.item.detail, row.item.url?.path].compactMap { $0 }.joined(separator: "\n"))
-                }
-                .width(min: 220, ideal: 320)
-                TableColumn("Kind", value: \.category).width(min: 110, ideal: 160)
-                TableColumn("From", value: \.from) { row in
-                    Text(row.item.owner.map { "Inside \($0)" } ?? (row.item.category == .system ? "App removed" : row.from))
-                        .foregroundStyle(row.item.category == .system && row.item.owner == nil ? .secondary : .primary)
-                }
-                .width(min: 70, ideal: 120)
-                TableColumn("State", value: \.state) { row in
-                    Text(row.item.state ?? "").foregroundStyle(row.item.state == "On" ? .primary : .secondary).lineLimit(1)
-                }
-                .width(min: 60, ideal: 120)
-                TableColumn("Where", value: \.place).width(min: 80, ideal: 100)
-                TableColumn("Size", value: \.size) { row in SizeText(bytes: row.item.bytes) }.width(min: 60, ideal: 80)
-            }
-            .contextMenu(forSelectionType: ExtensionRow.ID.self) { ids in
-                let rows = model.rows.filter { ids.contains($0.id) }
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(rows.compactMap(\.item.url)) }
-                    .disabled(rows.allSatisfy { $0.item.url == nil })
-                if let owner = rows.first(where: { $0.item.ownerURL != nil })?.item, let url = owner.ownerURL {
-                    Button("Uninstall \(owner.owner ?? "the App")…") { ExtensionsView.uninstall(app: url) }
-                }
-                if rows.contains(where: { $0.item.category == .system }) {
-                    Button("Open Login Items & Extensions Settings…") { Permissions.openLoginItemsSettings() }
-                }
-                Divider()
-                Button("Move to Trash…", role: .destructive) { selection = Set(ids); confirming = true }
-                    .disabled(!rows.contains(where: \.item.removable))
-            } primaryAction: { ids in
-                NSWorkspace.shared.activateFileViewerSelecting(model.rows.filter { ids.contains($0.id) }.compactMap(\.item.url))
-            }
-            .overlay {
-                if model.loading && model.rows.isEmpty { ProgressView("Looking…") }
-                else if !model.loading && mine.isEmpty { EmptyNote(symbol: page.symbol, title: "Nothing here", text: "Nothing of this kind has been added to this Mac.") }
-            }
-            actionBar
+            .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
+            .arrives(0)
+            TableCard(seed: "extensions-\(page.rawValue)") { table }.arrives(1, rise: 0)
+            actionBar.arrives(2)
         }
+        .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItem {
                 Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
@@ -254,6 +206,63 @@ struct ExtensionsView: View {
             Text(confirmMessage)
         }
         .onAppear { model.startIfNeeded() }
+    }
+
+    private var table: some View {
+        Table(visible, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name) { row in
+                HStack(spacing: 8) {
+                    if let url = row.item.url { Image(nsImage: AppLookup.icon(for: url, size: 18)).frame(width: 18, height: 18) }
+                    else { Image(systemName: row.item.category.symbol).frame(width: 18).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack(spacing: 5) { Text(row.name).lineLimit(1); OriginBadge(origin: row.item.origin) }
+                        if let note = row.item.note {
+                            Text(note).font(.spare(size: 10.5)).lineLimit(1).truncationMode(.tail)
+                                .foregroundStyle(row.item.category == .system && row.item.owner == nil && row.item.state != "Removed at restart" ? Ink.warm : Color.secondary)
+                        } else if let detail = row.item.detail {
+                            Text(detail).font(.spare(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                        }
+                    }
+                }
+                .help([row.item.note, row.item.detail, row.item.url?.path].compactMap { $0 }.joined(separator: "\n"))
+            }
+            .width(min: 220, ideal: 320)
+            TableColumn("Kind", value: \.category).width(min: 110, ideal: 160)
+            TableColumn("From", value: \.from) { row in
+                Text(row.item.owner.map { "Inside \($0)" } ?? (row.item.category == .system ? "App removed" : row.from))
+                    .foregroundStyle(row.item.category == .system && row.item.owner == nil ? .secondary : .primary)
+            }
+            .width(min: 70, ideal: 120)
+            TableColumn("State", value: \.state) { row in
+                Text(row.item.state ?? "").foregroundStyle(row.item.state == "On" ? .primary : .secondary).lineLimit(1)
+            }
+            .width(min: 60, ideal: 120)
+            TableColumn("Where", value: \.place).width(min: 80, ideal: 100)
+            TableColumn("Size", value: \.size) { row in SizeText(bytes: row.item.bytes) }.width(min: 60, ideal: 80)
+        }
+        .contextMenu(forSelectionType: ExtensionRow.ID.self) { ids in
+            let rows = model.rows.filter { ids.contains($0.id) }
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(rows.compactMap(\.item.url)) }
+                .disabled(rows.allSatisfy { $0.item.url == nil })
+            if let owner = rows.first(where: { $0.item.ownerURL != nil })?.item, let url = owner.ownerURL {
+                Button("Uninstall \(owner.owner ?? "the App")…") { ExtensionsView.uninstall(app: url) }
+            }
+            if rows.contains(where: { $0.item.category == .system }) {
+                Button("Open Login Items & Extensions Settings…") { Permissions.openLoginItemsSettings() }
+            }
+            Divider()
+            Button("Move to Trash…", role: .destructive) { selection = Set(ids); confirming = true }
+                .disabled(!rows.contains(where: \.item.removable))
+        } primaryAction: { ids in
+            NSWorkspace.shared.activateFileViewerSelecting(model.rows.filter { ids.contains($0.id) }.compactMap(\.item.url))
+        }
+        .overlay {
+            if model.loading && model.rows.isEmpty {
+                VStack(spacing: 8) { ThinkingDots(); Text("Looking").font(.spare(size: 12)).foregroundStyle(.secondary) }
+            } else if !model.loading && mine.isEmpty {
+                EmptyState(doodle: .box, title: "Nothing here", text: "Nothing of this kind has been added to this Mac.")
+            }
+        }
     }
 
     private var pageExplanation: String {
@@ -293,19 +302,18 @@ struct ExtensionsView: View {
 
     private var actionBar: some View {
         let removable = chosen.filter(\.item.removable)
-        return HStack(spacing: 10) {
+        return ActionBar {
             Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected" + (removable.count < chosen.count ? " · \(chosen.count - removable.count) \(chosen.contains { $0.item.category == .system } ? "removed only with their app" : "part of macOS")" : ""))
-                .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
-            if model.working { ProgressView().controlSize(.small) }
+            if model.working { ThinkingDots() }
             if removable.isEmpty, let owner = chosen.first(where: { $0.item.ownerURL != nil })?.item, let url = owner.ownerURL {
-                Button("Uninstall \(owner.owner ?? "the App")…") { ExtensionsView.uninstall(app: url) }
+                Button("Uninstall \(owner.owner ?? "the App")…") { ExtensionsView.uninstall(app: url) }.spareButton(.secondary)
             } else {
                 Button(chosen.contains { $0.item.category == .receipts } ? "Remove…" : "Move to Trash…", role: .destructive) { confirming = true }
+                    .spareButton(.secondary)
                     .disabled(removable.isEmpty || model.working)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 10)
-        .background(.bar)
     }
 }

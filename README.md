@@ -26,10 +26,11 @@ Screenshots in docs/images are made from sample data: `swift build`, run `.build
 Every topic has its own page in the sidebar.
 
 **Free Up Space**
-- **Cleanup**: Xcode build data and device support files; node_modules, Rust targets, Swift .build folders and other build folders beside their project file; package manager caches; app caches except macOS's own; logs; crash reports. Things that come back by themselves are selected; caches of open apps, projects touched within a month and anything a running program has open are not. **Your Call** lists old downloads, device backups, Xcode archives and AI models, never selected.
+- **Cleanup**: Xcode build data and device support files; node_modules, Rust targets, Swift .build folders and other build folders beside their project file; package manager caches; app caches except macOS's own; the caches Chromium browsers and Electron apps such as Slack and VS Code keep beside their data; copies Mail saved of attachments you opened; logs; crash reports. Things that come back by themselves are selected; caches of open apps, projects touched within a month and anything a running program has open are not. **Your Call** lists old downloads, Messages attachments of 5 MB or more, device backups, Xcode archives and AI models, never selected.
 - **Space**: folder sizes from your home folder down.
-- **Snapshots**: Time Machine's local snapshots, deleted with `tmutil deletelocalsnapshots` after a password prompt. APFS reports no size per snapshot; emptied ones show zero and the purgeable total is shown.
-- **macOS Downloads**: /System/Library/AssetsV2 grouped by feature (Apple Intelligence, dictation, voices, updates). System Integrity Protection guards these; Spare links to the setting that lets macOS remove them.
+- **Purgeable Space**: what macOS counts as System Data and gives back by itself when it runs low, part by part as macOS's own clean-up service reports it (Time Machine snapshots, files apps marked purgeable, cloud copies, app container caches, the Spotlight index, thumbnails). **Free Now** asks macOS to remove the files apps marked purgeable and downloads nothing uses any more, one service at a time, after checking that macOS will limit the purge to that service. The service is private to macOS, so it's called from a short-lived child copy of Spare; a change in macOS can then only stop the child. Time Machine's local snapshots are listed below and deleted with `tmutil deletelocalsnapshots` after a password prompt.
+- **macOS Downloads**: what macOS downloaded for itself. **Free** moves what an update or upgrade left in "macOS Install Data" to the Trash after a password prompt, once it's older than the running system, and asks macOS to remove the downloads no feature needs any more. Apple Intelligence's models stay while it's on: **Switch Off** sets Siri to another language, which makes macOS switch Apple Intelligence off and remove them, after a sheet that names the language and says it syncs to iPhone and iPad; **Switch On** puts Siri's language and voice back. Everything else in /System/Library/AssetsV2 is listed by feature with what keeps it, read from macOS's asset subscriptions (Siri in German and English, three dictionaries), and the setting that would let it go. System Integrity Protection guards these folders, so no app can delete them directly.
+- **Cloud Downloads**: files iCloud Drive, OneDrive, Google Drive, Dropbox and other File Provider apps keep downloaded while they're also online, per folder. Removing a download is what Finder's Remove Download does: the file stays in the cloud and in its folder. Only files that are fully uploaded and free of conflicts are touched, and folders that are online only are never opened, so nothing downloads.
 
 **Apps & Software**
 - **Apps**: each app with the files it keeps in ~/Library, matched by bundle identifier or exact name; uninstalling quits it, stops its login agents and moves everything to the Trash.
@@ -37,6 +38,9 @@ Every topic has its own page in the sidebar.
 - **Packages**: Homebrew formulae and casks with what needs what, and global npm, pnpm, Bun, Cargo, uv and pipx packages, removed with each manager's own command.
 - **Toolchains**: Rust toolchains and rustup (removed with rustup), Node, Python and Ruby versions, conda, SDKs and Xcode's Command Line Tools.
 - **Command-Line Tools**: commands in /usr/local no package manager tracks, with broken links of removed apps and Apple's own shims marked.
+- **Simulators**: Xcode's simulators with their size and when each last started, and the simulator systems (iOS, watchOS, tvOS, visionOS disk images) with how many simulators use each. Simulators that can't run any more are deleted together; others can be erased or deleted, and systems deleted, with Xcode's `simctl` after a confirmation. simctl is found through `xcode-select`, so a Mac without Xcode is never asked to install developer tools.
+- **Docker**: the disk file of Docker Desktop, OrbStack, Colima or Podman with the space it really takes, and what's inside as `docker system df` counts it. Build cache, images no container uses and stopped containers are cleared with Docker's own prune commands; volumes can hold databases, so they're only shown.
+- **Browser Extensions**: extensions in every profile of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari, with the ones that can read and change every website marked. Spare only lists them, since removing one in its browser is what stops it syncing back.
 
 **Startup**
 - **Login Items** and **Background Items**: tables with multiple selection. Launchd jobs can be turned off (`launchctl disable` + `bootout`), on, or removed; items apps register with macOS (from `sfltool dumpbtm`) link to Login Items settings; helper tools nothing starts are flagged.
@@ -51,13 +55,15 @@ Every topic has its own page in the sidebar.
 
 ## Honesty rules
 
-- Nothing is deleted by Spare except when you empty the Trash. Items go to the Trash; History records where each came from. Package managers delete their own packages, and accounts, printers and privacy decisions aren't files; Spare says so before any of these run.
+- Nothing is deleted by Spare except when you empty the Trash. Items go to the Trash; History records where each came from. Some things belong to a tool that removes them itself: package managers, Xcode's simulators, Docker, macOS's own clean-up and cloud apps' downloads. Accounts, printers and privacy decisions aren't files. Spare says so, and whether it can be undone, before any of these run.
 - Everything that needs an administrator in one action goes in one request, through one script per session, so macOS's five-minute grace period applies.
 - Nothing a running program has open is offered or moved (open files are read through libproc, as lsof does), so the Trash never ends up holding files an app still writes to.
 - Sizes are allocated blocks on disk. A file hard-linked from elsewhere (for example a pnpm store) is shown as shared and not counted as freed. APFS clones can't be told apart, so a cloned file counts in full.
-- macOS's own caches, documents, photos, mail and messages are never offered.
+- macOS's own caches, documents and photos are never offered. From Mail only its copies of attachments you opened are, since the messages keep theirs; Messages attachments are listed under Your Call and never selected.
 - Without Full Disk Access, Spare doesn't open guarded folders at all, so macOS never asks for them one by one; they're shown as locked.
 - No background process, no menu bar item, no notifications, no network access except optional update checks.
+
+How Spare looks, moves and feels, with the motion, texture and accessibility specs, is in [docs/DESIGN.md](docs/DESIGN.md).
 
 `.build/debug/Spare --report` prints what a cleanup would find, and `--inventory` what has been added to the Mac, without changing anything.
 
@@ -86,6 +92,10 @@ bash scripts/publish-release.sh 0.1.1
 
 Build numbers must increase. Versions up to 0.3.1 were published in lumen-xx/spare-releases and read their feed from there; publishing copies each new signed feed into it (with docs/LEGACY_README.md as its README), so those copies update to a build that reads the feed here.
 
+## Thanks
+
+Purgeable Space and the Apple Intelligence switch build on the research [MacSpace](https://github.com/1architect/macspace-releases) published about macOS's own clean-up service and about how Siri's language decides whether Apple Intelligence runs.
+
 ## License
 
-[MIT](LICENSE). Third-party notices, including Sparkle's, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). Third-party notices, including Sparkle's and the Bricolage Grotesque typeface's, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

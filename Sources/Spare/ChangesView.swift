@@ -104,67 +104,36 @@ struct ChangesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Text(explanation).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
+            HStack(spacing: 12) {
+                Text(explanation).font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 if kind == .privacy && mine.contains(where: \.ownerGone) {
-                    Toggle("Only apps that are gone", isOn: $onlyGone).toggleStyle(.checkbox).fixedSize()
+                    Toggle("Only apps that are gone", isOn: $onlyGone).toggleStyle(SketchCheckStyle()).fixedSize()
                 }
                 if let settings = settingsURL {
-                    Button("Open Settings…") { NSWorkspace.shared.open(settings) }.controlSize(.small)
+                    Button("Open Settings…") { NSWorkspace.shared.open(settings) }.spareButton(.secondary).controlSize(.small)
                 }
             }
-            .padding(.horizontal, 18).padding(.vertical, 10)
+            .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
+            .arrives(0)
             if kind == .privacy && !shared.fullDiskAccess {
-                FullDiskAccessNote(compact: true).padding(.horizontal, 18).padding(.bottom, 10)
+                FullDiskAccessNote(compact: true).padding(.horizontal, 18).padding(.bottom, 12).arrives(1)
             }
-            Table(visible, selection: $selection, sortOrder: $sortOrder) {
-                TableColumn("Name", value: \.name) { row in
-                    VStack(alignment: .leading, spacing: 0) {
-                        HStack(spacing: 5) {
-                            Text(row.name).lineLimit(1)
-                            OriginBadge(origin: row.origin)
-                        }
-                        if let detail = row.detail {
-                            Text(detail).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                        }
-                    }
-                    .help(row.detail ?? row.name)
-                }
-                .width(min: 220, ideal: 340)
-                TableColumn("State", value: \.stateText) { row in
-                    Text(row.state ?? "—").foregroundStyle(row.state == "Allowed" || row.state == "Connected" ? .primary : .secondary)
-                }
-                .width(min: 80, ideal: 110)
-                TableColumn("App", value: \.ownerText) { row in
-                    Text(row.ownerGone ? "Gone" : row.owner ?? "—").foregroundStyle(row.ownerGone ? .orange : .secondary)
-                }
-                .width(min: 80, ideal: 140)
-            }
-            .contextMenu(forSelectionType: SystemChange.ID.self) { ids in
-                let rows = mine.filter { ids.contains($0.id) }
-                if let settings = settingsURL { Button("Open Settings…") { NSWorkspace.shared.open(settings) } }
-                Divider()
-                Button(actionTitle + "…", role: .destructive) { selection = Set(ids); confirming = true }
-                    .disabled(!rows.contains(where: \.removable))
-            }
-            .overlay {
-                if model.loading && model.rows.isEmpty { ProgressView() }
-                else if !model.loading && mine.isEmpty { EmptyNote(symbol: "checkmark.seal", title: "Nothing added", text: emptyText) }
-            }
-            HStack(spacing: 10) {
+            TableCard(seed: "changes-\(kind.rawValue)") { table }.arrives(2, rise: 0)
+            ActionBar {
                 Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected" + (chosen.contains { !$0.removable } ? " · \(chosen.filter { !$0.removable }.count) changed only in Settings" : ""))
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
-                if model.working { ProgressView().controlSize(.small) }
+                if model.working { ThinkingDots() }
                 if kind != .vpn && kind != .profile {
                     Button(actionTitle + "…", role: .destructive) { confirming = true }
+                        .spareButton(.secondary)
                         .disabled(!chosen.contains(where: \.removable) || model.working)
                 }
             }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .background(.bar)
+            .arrives(3)
         }
+        .arrivalStage(replay: model.rows.isEmpty)
         .toolbar {
             ToolbarItem {
                 Button { model.load() } label: { Label("Look Again", systemImage: "arrow.clockwise") }
@@ -178,6 +147,46 @@ struct ChangesView: View {
             Text(confirmMessage)
         }
         .onAppear { model.startIfNeeded() }
+    }
+
+    private var table: some View {
+        Table(visible, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Name", value: \.name) { row in
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 5) {
+                        Text(row.name).lineLimit(1)
+                        OriginBadge(origin: row.origin)
+                    }
+                    if let detail = row.detail {
+                        Text(detail).font(.spare(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                .help(row.detail ?? row.name)
+            }
+            .width(min: 220, ideal: 340)
+            TableColumn("State", value: \.stateText) { row in
+                Text(row.state ?? "—").foregroundStyle(row.state == "Allowed" || row.state == "Connected" ? .primary : .secondary)
+            }
+            .width(min: 80, ideal: 110)
+            TableColumn("App", value: \.ownerText) { row in
+                Text(row.ownerGone ? "Gone" : row.owner ?? "—").foregroundStyle(row.ownerGone ? Ink.warm : .secondary)
+            }
+            .width(min: 80, ideal: 140)
+        }
+        .contextMenu(forSelectionType: SystemChange.ID.self) { ids in
+            let rows = mine.filter { ids.contains($0.id) }
+            if let settings = settingsURL { Button("Open Settings…") { NSWorkspace.shared.open(settings) } }
+            Divider()
+            Button(actionTitle + "…", role: .destructive) { selection = Set(ids); confirming = true }
+                .disabled(!rows.contains(where: \.removable))
+        }
+        .overlay {
+            if model.loading && model.rows.isEmpty {
+                VStack(spacing: 8) { ThinkingDots(); Text("Looking").font(.spare(size: 12)).foregroundStyle(.secondary) }
+            } else if !model.loading && mine.isEmpty {
+                EmptyState(doodle: kind == .privacy && !shared.fullDiskAccess ? .lock : .sprout, title: "Nothing added", text: emptyText)
+            }
+        }
     }
 
     private var actionTitle: String { kind == .privacy ? "Reset" : kind == .account ? "Delete" : "Remove" }

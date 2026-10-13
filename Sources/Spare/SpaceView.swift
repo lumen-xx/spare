@@ -6,33 +6,38 @@ struct SpaceView: View {
     @ObservedObject var shared = Shared.shared
     @State private var selection: SpaceModel.Entry.ID?
     @State private var confirming: SpaceModel.Entry?
+    @Environment(\.reduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            header.arrives(0)
             if model.entries.isEmpty && model.measuring == 0 {
-                EmptyNote(symbol: "folder", title: "Nothing in this folder", text: "Or Spare isn't allowed to look inside it.")
+                EmptyState(doodle: .folder, title: "Nothing in this folder", text: "Or Spare isn't allowed to look inside it.")
+                    .arrives(1)
             } else {
-                List(selection: $selection) {
-                    ForEach(model.entries) { entry in
-                        SpaceRow(entry: entry, largest: model.largest)
-                            .tag(entry.id)
-                            .contextMenu { menu(for: entry) }
+                TableCard(seed: "space") {
+                    List(selection: $selection) {
+                        ForEach(model.entries) { entry in
+                            SpaceRow(entry: entry, largest: model.largest)
+                                .tag(entry.id)
+                                .contextMenu { menu(for: entry) }
+                        }
+                    }
+                    .listStyle(.inset)
+                    .alternatingRowBackgrounds(.disabled)
+                    .contextMenu(forSelectionType: SpaceModel.Entry.ID.self) { _ in } primaryAction: { ids in
+                        if let id = ids.first, let entry = model.entries.first(where: { $0.id == id }) { open(entry) }
+                    }
+                    .onKeyPress(.return) {
+                        guard let id = selection, let entry = model.entries.first(where: { $0.id == id }) else { return .ignored }
+                        open(entry); return .handled
                     }
                 }
-                .listStyle(.inset)
-                .alternatingRowBackgrounds(.disabled)
-                .scrollIndicators(.never)
-                .contextMenu(forSelectionType: SpaceModel.Entry.ID.self) { _ in } primaryAction: { ids in
-                    if let id = ids.first, let entry = model.entries.first(where: { $0.id == id }) { open(entry) }
-                }
-                .onKeyPress(.return) {
-                    guard let id = selection, let entry = model.entries.first(where: { $0.id == id }) else { return .ignored }
-                    open(entry); return .handled
-                }
+                .padding(.bottom, 18)
+                .arrives(1)
             }
         }
+        .arrivalStage()
         .toolbar {
             ToolbarItemGroup {
                 Button { model.chooseFolder() } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
@@ -53,35 +58,42 @@ struct SpaceView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 4) {
+            HStack(spacing: 2) {
                 ForEach(Array(model.trail.enumerated()), id: \.offset) { index, url in
                     if index > 0 { Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary) }
-                    Button { model.go(to: index) } label: {
-                        Text(index > 0 ? url.lastPathComponent : url == home ? "Home" : Catalog.tilde(url, home: home))
-                            .font(.system(size: 12, weight: index == model.trail.count - 1 ? .semibold : .regular))
-                            .foregroundStyle(index == model.trail.count - 1 ? .primary : .secondary)
+                    let name = index > 0 ? url.lastPathComponent : url == home ? "Home" : Catalog.tilde(url, home: home)
+                    if index == model.trail.count - 1 {
+                        Text(name).font(.spare(size: 12, weight: .semibold)).padding(.horizontal, 5)
+                    } else {
+                        Button { withAnimation(reduceMotion ? Motion.calm : Motion.settle) { model.go(to: index) } } label: {
+                            Text(name).font(.spare(size: 12)).foregroundStyle(.secondary)
+                        }
+                        .spareButton(.quiet)
+                        .controlSize(.small)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(index == model.trail.count - 1)
                 }
             }
+            .padding(.horizontal, -5)
             HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Text(model.currentBytes.map(Bytes.text) ?? "Measuring…")
-                    .font(.system(size: 30, weight: .bold, design: .rounded))
+                Text(model.currentBytes.map(Bytes.text) ?? "Measuring")
+                    .font(.spare(size: 30, weight: .bold))
                     .contentTransition(.numericText())
-                    .animation(.snappy, value: model.currentBytes)
+                    .animation(Motion.count, value: model.currentBytes)
                 Text("in \(FileManager.default.displayName(atPath: model.current.path))").foregroundStyle(.secondary)
                 Spacer()
                 if model.measuring > 0 {
-                    ProgressView().controlSize(.small)
-                    Text("\(model.measuring) to go").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    ThinkingDots()
+                    Text("\(model.measuring) to go").font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                        .animation(Motion.count, value: model.measuring)
                 }
             }
+            .animation(Motion.settle, value: model.measuring > 0)
             if !shared.fullDiskAccess && model.entries.contains(where: \.locked) {
                 FullDiskAccessNote(compact: true)
             }
         }
-        .padding(.horizontal, 22).padding(.vertical, 14)
+        .padding(.horizontal, 24).padding(.top, 16).padding(.bottom, 12)
     }
 
     private func open(_ entry: SpaceModel.Entry) {
@@ -116,32 +128,24 @@ struct SpaceRow: View {
             if entry.locked {
                 Image(systemName: "lock.fill").font(.system(size: 9)).foregroundStyle(.tertiary)
                     .help("Needs Full Disk Access")
+                    .accessibilityLabel("Needs Full Disk Access")
             } else if entry.unreadable > 0 {
                 Image(systemName: "lock").font(.system(size: 9)).foregroundStyle(.tertiary)
                     .help("Some folders inside couldn't be read, so it may be larger.")
+                    .accessibilityLabel("Partly unreadable")
             }
             Spacer(minLength: 12)
-            bar.frame(width: 160, height: 6)
+            UsageBar(fraction: largest > 0 ? Double(entry.bytes ?? 0) / Double(largest) : 0, seed: Jitter.seed(entry.id))
+                .frame(width: 160)
             Group {
-                if entry.bytes == nil && !entry.locked { ProgressView().controlSize(.mini) }
+                if entry.bytes == nil && !entry.locked { ThinkingDots() }
                 else { SizeText(bytes: entry.bytes) }
             }
             .frame(width: 80, alignment: .trailing)
             Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
                 .foregroundStyle(.tertiary).opacity(entry.isFolder && !entry.locked ? 1 : 0)
+                .accessibilityHidden(true)
         }
         .padding(.vertical, 3)
-    }
-
-    private var bar: some View {
-        GeometryReader { geometry in
-            let fraction = largest > 0 ? CGFloat(Double(entry.bytes ?? 0) / Double(largest)) : 0
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.07))
-                Capsule()
-                    .fill(LinearGradient(colors: [Color.accentColor.opacity(0.75), Color.accentColor], startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(fraction > 0 ? 4 : 0, geometry.size.width * fraction))
-            }
-        }
     }
 }

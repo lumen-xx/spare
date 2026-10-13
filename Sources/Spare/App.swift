@@ -7,6 +7,8 @@ enum Entry {
         // A plain-text report of what a cleanup would find, for checking Spare from Terminal. It only reads.
         if CommandLine.arguments.contains("--report") { Report.run(); exit(0) }
         if CommandLine.arguments.contains("--inventory") { Report.inventory(); exit(0) }
+        // macOS's own clean-up runs in a child copy of Spare, so a change in its private interface can't crash the app.
+        if PurgeTool.runIfAsked(CommandLine.arguments) { exit(0) }
         #if DEBUG
         // Checks that commands and their arguments reach the session script intact, without asking for a password.
         if CommandLine.arguments.contains("--check-privileged") {
@@ -60,16 +62,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { Updates.shared.start() }
         #if DEBUG
-        // Shows a sample message, to check how messages look and leave.
+        // Shows a sample problem, to check how messages look, offer their next step and stay.
         if UserDefaults.standard.bool(forKey: "previewBanner") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                Shared.shared.banner = .init(title: "The Trash wasn't emptied", detail: "Sample message", failed: true)
+                Shared.shared.banner = .init(title: "The Trash wasn't emptied",
+                                             detail: "Finder couldn't delete 2 items because an app is still using them. Quit it and try again.",
+                                             failed: true, next: .init(title: "Try Again") { Shared.shared.emptyTrash() })
             }
         }
         #endif
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// Siri's language is never left half-changed: while Spare switches Apple Intelligence, it quits once Siri is settled.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { MacDownloadsModel.shared.holdQuit() ? .terminateLater : .terminateNow }
+    }
 
     /// Coming back from System Settings may mean Full Disk Access changed, and the disk certainly may have.
     func applicationDidBecomeActive(_ notification: Notification) {
@@ -78,8 +87,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum Page: String, CaseIterable, Identifiable {
-    case cleanup = "Cleanup", space = "Space", snapshots = "Snapshots", macOSDownloads = "macOS Downloads"
+    case cleanup = "Cleanup", space = "Space", purgeable = "Purgeable Space", macOSDownloads = "macOS Downloads", cloudDownloads = "Cloud Downloads"
     case apps = "Apps", leftovers = "Leftovers", packages = "Packages", toolchains = "Toolchains", commandLineTools = "Command-Line Tools"
+    case simulators = "Simulators", docker = "Docker", browserExtensions = "Browser Extensions"
     case loginItems = "Login Items", background = "Background Items"
     case systemExtensions = "System Extensions", drivers = "Drivers", plugIns = "Plug-ins", fonts = "Fonts", inputMethods = "Input Methods"
     case installerPackages = "Installer Packages", searchPaths = "Search Paths"
@@ -92,13 +102,17 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .cleanup: "sparkles"
         case .space: "chart.bar.doc.horizontal"
-        case .snapshots: "clock.badge.checkmark"
+        case .purgeable: "externaldrive.badge.timemachine"
         case .macOSDownloads: "arrow.down.app"
+        case .cloudDownloads: "icloud.and.arrow.down"
         case .apps: "app.dashed"
         case .leftovers: "tray.full"
         case .packages: "shippingbox"
         case .toolchains: "hammer"
         case .commandLineTools: "terminal"
+        case .simulators: "iphone"
+        case .docker: "cube.transparent"
+        case .browserExtensions: "puzzlepiece"
         case .loginItems: "power"
         case .background: "gearshape.2"
         case .systemExtensions: "puzzlepiece.extension"
@@ -121,8 +135,8 @@ enum Page: String, CaseIterable, Identifiable {
     }
 
     static let sections: [(String, [Page])] = [
-        ("Free Up Space", [.cleanup, .space, .snapshots, .macOSDownloads]),
-        ("Apps & Software", [.apps, .leftovers, .packages, .toolchains, .commandLineTools]),
+        ("Free Up Space", [.cleanup, .space, .purgeable, .macOSDownloads, .cloudDownloads]),
+        ("Apps & Software", [.apps, .leftovers, .packages, .toolchains, .commandLineTools, .simulators, .docker, .browserExtensions]),
         ("Startup", [.loginItems, .background]),
         ("System Additions", [.systemExtensions, .drivers, .plugIns, .fonts, .inputMethods, .installerPackages, .searchPaths]),
         ("System Changes", [.accounts, .printers, .vpn, .profiles, .privacy]),
@@ -159,6 +173,15 @@ struct ContentView: View {
     @ObservedObject private var navigation = Navigation.shared
     @ObservedObject private var shared = Shared.shared
     @ObservedObject private var cleanup = CleanupModel.shared
+    @ObservedObject private var tint = AppTint.shared
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+
+    private var reduceMotion: Bool {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "reduceMotion") { return true }
+        #endif
+        return systemReduceMotion
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -169,19 +192,24 @@ struct ContentView: View {
                 Section { row(.history); row(.settings) }
             }
             .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 290)
+            .scrollIndicators(.never)
             // With many pages the list scrolls; the disk summary keeps its own backing so rows don't show through it.
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 DiskSummary().padding(14).frame(maxWidth: .infinity, alignment: .leading)
                     .background(.bar)
-                    .overlay(alignment: .top) { Divider() }
+                    .overlay(alignment: .top) { SketchDivider(seed: 0xD15C) }
             }
         } detail: {
             Group {
                 switch navigation.page {
                 case .cleanup: CleanupView()
                 case .space: SpaceView()
-                case .snapshots: SystemDataView(part: .snapshots)
-                case .macOSDownloads: SystemDataView(part: .downloads)
+                case .purgeable: PurgeableView()
+                case .macOSDownloads: MacDownloadsView()
+                case .cloudDownloads: CloudView()
+                case .simulators: SimulatorsView()
+                case .docker: DockerView()
+                case .browserExtensions: BrowserExtensionsView()
                 case .apps: AppsView()
                 case .leftovers: LeftoversView()
                 case .packages: PackagesView(part: .managers)
@@ -203,10 +231,17 @@ struct ContentView: View {
                 }
             }
             .navigationTitle(navigation.page.rawValue)
+            // One toolbar backing across the page, whether or not a scrolling list touches it.
+            .toolbarBackground(.visible, for: .windowToolbar)
+            .background(PaperBackground().ignoresSafeArea())
+            .overlay(alignment: .bottom) {
+                BannerView().animation(reduceMotion ? Motion.calm : Motion.panel, value: shared.banner)
+            }
         }
-        .overlay(alignment: .bottom) {
-            BannerView().animation(.snappy, value: shared.banner)
-        }
+        .font(.spare(size: 13))
+        .tint(tint.color)
+        .environment(\.tintText, tint.text)
+        .environment(\.reduceMotion, reduceMotion)
     }
 
     private func row(_ page: Page) -> some View {
@@ -230,28 +265,28 @@ struct DiskSummary: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 6) {
                     Image(systemName: "internaldrive").foregroundStyle(.secondary)
-                    Text(shared.volumeName).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text(shared.volumeName).font(.spare(size: 12, weight: .semibold)).lineLimit(1)
                 }
-                GeometryReader { geometry in
-                    let used = space.total > 0 ? CGFloat(Double(space.used) / Double(space.total)) : 0
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.primary.opacity(0.09))
-                        Capsule().fill(used > 0.9 ? Color.orange : Color.accentColor).frame(width: geometry.size.width * used)
-                    }
-                }
-                .frame(height: 6)
+                let used = space.total > 0 ? Double(space.used) / Double(space.total) : 0
+                UsageBar(fraction: used, tint: used > 0.9 ? Ink.warm : nil, seed: 0xD15C)
                 Text("\(Bytes.text(space.free)) free of \(Bytes.text(space.total))")
-                    .font(.system(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
-                // What macOS can clear by itself is on the Snapshots page; here only what's free.
+                    .font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
+                    .contentTransition(.numericText())
+                    .animation(Motion.count, value: space.free)
+                // What macOS can clear by itself is on the Purgeable Space page; here only what's free.
                 if let trash = shared.trashBytes, trash > 0 {
-                    Divider().padding(.vertical, 2)
+                    SketchDivider(seed: 0x7A54).padding(.vertical, 2)
                     HStack {
-                        Text("Trash: \(Bytes.text(trash))").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                        Text("Trash: \(Bytes.text(trash))").font(.spare(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                            .contentTransition(.numericText())
                         Spacer()
-                        Button("Empty…") { shared.emptyTrash() }.buttonStyle(.borderless).font(.system(size: 11))
+                        Button("Empty…") { shared.emptyTrash() }.spareButton(.quiet).controlSize(.small)
                     }
+                    .transition(.opacity)
                 }
             }
+            .animation(Motion.settle, value: shared.trashBytes)
+            .accessibilityElement(children: .contain)
         }
     }
 }
@@ -309,9 +344,27 @@ enum Report {
             print("  [\(item.place.rawValue)] \(item.name) — \(item.owner ?? "?") \(item.kind)\(item.sensitive ? " · keys" : "")\(item.ownerGone ? " · owner gone" : "")\(item.origin == .macOS ? " [macOS]" : "")")
         }
         print("  \(items.filter { $0.place == .home }.count) hidden items in home")
-        lap("System Data")
+        lap("Purgeable space")
+        // Read-only: the child copy of Spare only asks how much each part of macOS could give back.
+        for (service, bytes) in (PurgeTool.purgeable(urgency: 3) ?? [:]).filter({ $0.value > 0 }).sorted(by: { $0.value > $1.value }) {
+            print("  \(CacheDelete.Service(rawValue: service)?.title ?? service): \(Bytes.text(bytes))")
+        }
+        if let gentle = PurgeTool.purgeable(urgency: CacheDelete.Service.macOSDownloads.urgency) {
+            print("  unused macOS downloads, as Spare frees them: \(Bytes.text(gentle[CacheDelete.Service.macOSDownloads.rawValue] ?? 0))")
+        }
         print("  snapshots: \(Snapshots.parse(Shell.run("/usr/bin/tmutil", ["listlocalsnapshots", "/"]).output).map(\.name))")
-        for asset in SystemAssets.measure() { print("  \(asset.feature.rawValue): \(Bytes.text(asset.bytes)) in \(asset.folders.count) folders") }
+        lap("macOS downloads")
+        let subscriptions = AssetSubscriptions.live()
+        let intelligence = AppleIntelligence.status()
+        for asset in SystemAssets.measure() {
+            let holder = subscriptions.flatMap { AssetSubscriptions.holder(of: asset.feature, in: $0, siriLanguage: intelligence.siriLanguage,
+                                                                         systemLanguage: intelligence.systemLanguage) }
+            print("  \(asset.feature.rawValue): \(asset.hidden ? "at least " : "")\(Bytes.text(asset.bytes)) in \(asset.folders.count) folders\(holder.map { " — " + $0 } ?? "")")
+        }
+        if let leftovers = UpdateLeftovers.find() {
+            print("  update download: \(Bytes.text(leftovers.bytes)) · \(leftovers.product ?? "unnamed") · \(leftovers.isLeftover ? "left behind" : "waiting to install")")
+        }
+        print("  Apple Intelligence: \(intelligence.state.rawValue) — \(intelligence.explanation)")
         lap("done")
     }
 
