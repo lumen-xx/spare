@@ -80,35 +80,6 @@ final class ExtensionsModel: ObservableObject {
         return items
     }
 
-    /// Removes installer packages: what they left goes to the Trash, their launch jobs are stopped first, and macOS
-    /// forgets their receipts, all after one password prompt. Returns how many items moved, or nil if cancelled.
-    private func removePackages(_ packages: [Extension]) -> Int? {
-        let parts = packages.flatMap(\.parts)
-        let uid = getuid()
-        let stops = parts.filter { $0.pathExtension == "plist" && ($0.path.hasPrefix("/Library/LaunchDaemons/") || $0.path.hasPrefix("/Library/LaunchAgents/")) }
-            .compactMap { plist -> String? in
-                guard let label = NSDictionary(contentsOf: plist)?["Label"] as? String else { return nil }
-                return "launchctl bootout \(plist.path.hasPrefix("/Library/LaunchDaemons/") ? "system" : "gui/\(uid)")/\(Privileged.quoted(label))"
-            }
-        var after = packages.map { "pkgutil --forget \(Privileged.quoted($0.name))" }
-        if parts.contains(where: { $0.path.hasPrefix("/Library/Audio/Plug-Ins/HAL/") }) { after.append("killall coreaudiod") }
-        let prompt = "Spare wants to remove \(packages.count == 1 ? packages[0].name : "\(packages.count) installer packages")."
-        if parts.isEmpty {
-            // Nothing left on the disk: only the receipts go.
-            if let problem = Privileged.run(after.joined(separator: "; ") + "; true", prompt: prompt) {
-                if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem, failed: true) }
-                return nil
-            }
-            return 0
-        }
-        guard let records = AdminTrash.move(parts, before: stops, after: after, prompt: prompt) else { return nil }
-        if !records.isEmpty {
-            HistoryModel.shared.add(TrashSession(title: packages.count == 1 ? "Removed \(packages[0].name)" : "Removed \(packages.count) installer packages",
-                                                 records: records, bytes: packages.compactMap(\.bytes).reduce(0, +)))
-        }
-        return records.count
-    }
-
     /// Moves extensions to the Trash: your own without a password, every account's together after one prompt.
     func remove(_ chosen: [ExtensionRow]) async {
         let items = chosen.map(\.item).filter(\.removable)
@@ -124,19 +95,41 @@ final class ExtensionsModel: ObservableObject {
             moved += outcome.session?.records.count ?? 0
             problems += outcome.failures
         }
+        // Everything that needs an administrator goes in one request, so there is one password prompt.
         let packages = items.filter { $0.category == .receipts }
-        var forgotten = 0
-        if !packages.isEmpty, let outcome = removePackages(packages) { moved += outcome; forgotten = packages.count }
         let shared = items.filter { $0.forAllUsers && $0.category != .receipts }
-        if !shared.isEmpty {
+        var forgotten = 0
+        if !packages.isEmpty || !shared.isEmpty {
+            let uid = getuid()
+            let parts = packages.flatMap(\.parts)
+            let stops = parts.filter { $0.pathExtension == "plist" && ($0.path.hasPrefix("/Library/LaunchDaemons/") || $0.path.hasPrefix("/Library/LaunchAgents/")) }
+                .compactMap { plist -> String? in
+                    guard let label = NSDictionary(contentsOf: plist)?["Label"] as? String else { return nil }
+                    return "launchctl bootout \(plist.path.hasPrefix("/Library/LaunchDaemons/") ? "system" : "gui/\(uid)")/\(Privileged.quoted(label))"
+                }
+            var after = packages.map { "pkgutil --forget \(Privileged.quoted($0.name))" }
             // A removed audio driver only disappears once the audio system restarts; sound stops for a moment.
-            let after = shared.contains { $0.category == .audioDrivers } ? ["killall coreaudiod"] : []
-            if let records = AdminTrash.move(shared.compactMap(\.url), after: after,
-                                             prompt: "Spare wants to remove \(shared.count == 1 ? shared[0].name : "\(shared.count) items") installed for every account."),
-               !records.isEmpty {
-                HistoryModel.shared.add(TrashSession(title: shared.count == 1 ? "Removed \(shared[0].name)" : "Removed \(shared.count) extensions",
-                                                     records: records, bytes: shared.compactMap(\.bytes).reduce(0, +)))
-                moved += records.count
+            if shared.contains(where: { $0.category == .audioDrivers }) || parts.contains(where: { $0.path.hasPrefix("/Library/Audio/Plug-Ins/HAL/") }) {
+                after.append("killall coreaudiod")
+            }
+            let urls = parts + shared.compactMap(\.url)
+            let count = packages.count + shared.count
+            let names = (packages + shared).map(\.name)
+            let prompt = "Spare wants to remove \(count == 1 ? names[0] : "\(count) items") installed for every account."
+            if urls.isEmpty {
+                // Only installer records are left: nothing to move.
+                if let problem = Privileged.run(after.joined(separator: "; ") + "; true", prompt: prompt) {
+                    if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem, failed: true) }
+                } else {
+                    forgotten = packages.count
+                }
+            } else if let records = AdminTrash.move(urls, before: stops, after: after, prompt: prompt) {
+                forgotten = packages.count
+                if !records.isEmpty {
+                    HistoryModel.shared.add(TrashSession(title: count == 1 ? "Removed \(names[0])" : "Removed \(count) items",
+                                                         records: records, bytes: (packages + shared).compactMap(\.bytes).reduce(0, +)))
+                    moved += records.count
+                }
             }
         }
         load()

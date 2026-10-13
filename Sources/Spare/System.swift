@@ -40,17 +40,49 @@ enum Permissions {
 
 /// Things only an administrator, or Finder, can do. Both go through macOS's own prompts; Spare never sees a password.
 enum Privileged {
-    /// Runs a shell command as root after macOS asks for an administrator password. Returns nil on success, or why not.
+    /// One script for the whole session. macOS doesn't ask for the password again for five minutes when the same
+    /// script runs another privileged command, but a new script each time asked every time.
+    private static let runner: NSAppleScript? = {
+        let script = NSAppleScript(source: """
+            on run_command(command, message, privileged)
+                if privileged then
+                    return do shell script command with administrator privileges with prompt message
+                else
+                    return do shell script command
+                end if
+            end run_command
+            """)
+        var error: NSDictionary?
+        script?.compileAndReturnError(&error)
+        return error == nil ? script : nil
+    }()
+
+    /// Runs a shell command as root after macOS asks for an administrator password (or not, within five minutes of
+    /// the last time). Returns nil on success, or why not.
     @MainActor
     static func run(_ command: String, prompt: String) -> String? {
-        let escape = { (text: String) in text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-        let source = "do shell script \"\(escape(command))\" with administrator privileges with prompt \"\(escape(prompt))\""
+        call(command, prompt: prompt, privileged: true).problem
+    }
+
+    /// Calls the session's script. `privileged: false` exists so the plumbing can be checked without a password.
+    @MainActor
+    static func call(_ command: String, prompt: String, privileged: Bool) -> (output: String?, problem: String?) {
+        guard let runner else { return (nil, "Couldn't prepare the request.") }
+        // A call to the script's handler: AppleScript suite 'ascr', subroutine event 'psbr', handler name in 'snam'.
+        let event = NSAppleEventDescriptor(eventClass: 0x6173_6372, eventID: 0x7073_6272, targetDescriptor: .currentProcess(),
+                                           returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        event.setDescriptor(NSAppleEventDescriptor(string: "run_command"), forKeyword: 0x736E_616D)
+        let arguments = NSAppleEventDescriptor.list()
+        arguments.insert(NSAppleEventDescriptor(string: command), at: 1)
+        arguments.insert(NSAppleEventDescriptor(string: prompt), at: 2)
+        arguments.insert(NSAppleEventDescriptor(boolean: privileged), at: 3)
+        event.setDescriptor(arguments, forKeyword: keyDirectObject)
         var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
-        guard let error else { return nil }
+        let result = runner.executeAppleEvent(event, error: &error)
+        guard let error else { return (result.stringValue, nil) }
         // -128: the person cancelled.
-        if (error[NSAppleScript.errorNumber] as? Int) == -128 { return "Cancelled." }
-        return error[NSAppleScript.errorMessage] as? String ?? "Unknown error."
+        if (error[NSAppleScript.errorNumber] as? Int) == -128 { return (nil, "Cancelled.") }
+        return (nil, error[NSAppleScript.errorMessage] as? String ?? "Unknown error.")
     }
 
     /// Asks Finder to move an item to the Trash. Finder asks for a password when the item needs one, as when

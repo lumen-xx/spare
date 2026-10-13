@@ -7,6 +7,17 @@ enum Entry {
         // A plain-text report of what a cleanup would find, for checking Spare from Terminal. It only reads.
         if CommandLine.arguments.contains("--report") { Report.run(); exit(0) }
         if CommandLine.arguments.contains("--inventory") { Report.inventory(); exit(0) }
+        #if DEBUG
+        // Checks that commands and their arguments reach the session script intact, without asking for a password.
+        if CommandLine.arguments.contains("--check-privileged") {
+            MainActor.assumeIsolated {
+                let first = Privileged.call("printf '%s' \"it's $((20 + 22))\"", prompt: "unused", privileged: false)
+                let second = Privileged.call("printf second", prompt: "unused", privileged: false)
+                print(first.output == "it's 42" && second.output == "second" ? "PASS session script runs commands" : "FAIL \(first) \(second)")
+            }
+            exit(0)
+        }
+        #endif
         SpareApp.main()
     }
 }
