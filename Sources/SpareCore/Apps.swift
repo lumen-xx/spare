@@ -1,0 +1,200 @@
+import Foundation
+import CoreServices
+
+/// An app in /Applications or ~/Applications.
+public struct InstalledApp: Identifiable, Sendable {
+    public let url: URL
+    public let bundleID: String
+    public let name: String
+    public let version: String?
+    /// Comes with macOS or from Apple; Spare doesn't offer to remove these.
+    public let isApple: Bool
+    public let fromAppStore: Bool
+    public var lastUsed: Date?
+    public var size = Usage()
+    public var leftovers: [Leftover] = []
+    public var id: String { url.path }
+
+    public init(url: URL, bundleID: String, name: String, version: String?, isApple: Bool, fromAppStore: Bool, lastUsed: Date? = nil) {
+        self.url = url; self.bundleID = bundleID; self.name = name; self.version = version
+        self.isApple = isApple; self.fromAppStore = fromAppStore; self.lastUsed = lastUsed
+    }
+    public var dataBytes: Int64 { leftovers.reduce(0) { $0 + $1.usage.bytes } }
+    public var totalBytes: Int64 { size.bytes + dataBytes }
+}
+
+/// Something an app keeps in ~/Library.
+public struct Leftover: Identifiable, Sendable, Hashable {
+    public let url: URL
+    public let kind: String
+    public var usage = Usage()
+    public var id: String { url.path }
+}
+
+/// Files in ~/Library named after an app that is no longer installed.
+public struct Orphan: Identifiable, Sendable {
+    public let bundleID: String
+    public var leftovers: [Leftover]
+    public var newest: Date?
+    public var id: String { bundleID }
+    public var bytes: Int64 { leftovers.reduce(0) { $0 + $1.usage.bytes } }
+}
+
+public enum Apps {
+    public static func installed(home: URL) -> [InstalledApp] {
+        var bundles: [URL] = []
+        for folder in [URL(fileURLWithPath: "/Applications"), home.appendingPathComponent("Applications")] {
+            for entry in Catalog.list(folder) {
+                if entry.pathExtension == "app" { bundles.append(entry) }
+                // One level of folders, such as "Adobe Photoshop 2025" or "Utilities".
+                else if (try? entry.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                    bundles += Catalog.list(entry).filter { $0.pathExtension == "app" }
+                }
+            }
+        }
+        return bundles.compactMap { url in
+            guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { return nil }
+            let info = bundle.infoDictionary ?? [:]
+            let name = FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+            return InstalledApp(url: url, bundleID: id, name: name,
+                                version: info["CFBundleShortVersionString"] as? String,
+                                isApple: id.hasPrefix("com.apple."),
+                                fromAppStore: FileManager.default.fileExists(atPath: url.appendingPathComponent("Contents/_MASReceipt").path),
+                                lastUsed: lastUsed(url))
+        }
+    }
+
+    static func lastUsed(_ url: URL) -> Date? {
+        guard let item = MDItemCreateWithURL(nil, url as CFURL) else { return nil }
+        return MDItemCopyAttribute(item, kMDItemLastUsedDate) as? Date
+    }
+
+    /// Where apps keep things in ~/Library, what to call each place, and whether macOS guards it.
+    struct Place {
+        let folder: String
+        let kind: String
+        let guarded: Bool
+        /// Whether an entry with this name belongs to the app: (entry, bundle identifier, names).
+        let matches: (String, String, [String]) -> Bool
+    }
+
+    static func named(_ entry: String, _ names: [String]) -> Bool {
+        names.contains { $0.count >= 3 && $0.caseInsensitiveCompare(entry) == .orderedSame }
+    }
+
+    static let places: [Place] = [
+        Place(folder: "Library/Application Support", kind: "Support files", guarded: false) { e, id, names in e == id || e.hasPrefix(id + ".") || named(e, names) },
+        Place(folder: "Library/Caches", kind: "Caches", guarded: false) { e, id, names in e == id || e.hasPrefix(id + ".") || named(e, names) },
+        Place(folder: "Library/Preferences", kind: "Settings", guarded: false) { e, id, _ in e.hasSuffix(".plist") && (e == id + ".plist" || e.hasPrefix(id + ".")) },
+        Place(folder: "Library/Preferences/ByHost", kind: "Settings", guarded: false) { e, id, _ in e.hasPrefix(id + ".") },
+        Place(folder: "Library/Containers", kind: "App sandbox", guarded: true) { e, id, _ in e == id || e.hasPrefix(id + ".") },
+        Place(folder: "Library/Saved Application State", kind: "Saved windows", guarded: false) { e, id, _ in e == id + ".savedState" },
+        Place(folder: "Library/HTTPStorages", kind: "Web data", guarded: false) { e, id, _ in e == id || e == id + ".binarycookies" },
+        Place(folder: "Library/WebKit", kind: "Web data", guarded: false) { e, id, _ in e == id },
+        Place(folder: "Library/Cookies", kind: "Cookies", guarded: true) { e, id, _ in e == id + ".binarycookies" },
+        Place(folder: "Library/Logs", kind: "Logs", guarded: false) { e, id, names in e == id || named(e, names) },
+        Place(folder: "Library/Application Scripts", kind: "Scripts", guarded: false) { e, id, _ in e == id || e.hasPrefix(id + ".") },
+        Place(folder: "Library/LaunchAgents", kind: "Login agent", guarded: false) { e, id, _ in e.hasSuffix(".plist") && e.hasPrefix(id) }
+    ]
+
+    /// What an app keeps in ~/Library, matched by its bundle identifier or exact name, measured.
+    public static func leftovers(for app: InstalledApp, home: URL, fullDiskAccess: Bool, cancel: Cancellation) -> [Leftover] {
+        var names = [app.name, app.url.deletingPathExtension().lastPathComponent]
+        if let bundleName = Bundle(url: app.url)?.infoDictionary?["CFBundleName"] as? String { names.append(bundleName) }
+        names = Array(Set(names))
+        var found: [Leftover] = []
+        for place in places where fullDiskAccess || !place.guarded {
+            let folder = home.appendingPathComponent(place.folder)
+            for entry in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] where place.matches(entry, app.bundleID, names) {
+                found.append(Leftover(url: folder.appendingPathComponent(entry), kind: place.kind))
+            }
+        }
+        // Vendors often nest: com.google.Chrome keeps "Application Support/Google/Chrome".
+        let parts = app.bundleID.split(separator: ".")
+        if parts.count >= 3 {
+            let vendor = String(parts[1]), product = String(parts[parts.count - 1])
+            let support = home.appendingPathComponent("Library/Application Support")
+            for vendorFolder in (try? FileManager.default.contentsOfDirectory(atPath: support.path)) ?? []
+            where vendorFolder.caseInsensitiveCompare(vendor) == .orderedSame {
+                for entry in (try? FileManager.default.contentsOfDirectory(atPath: support.appendingPathComponent(vendorFolder).path)) ?? []
+                where entry.caseInsensitiveCompare(product) == .orderedSame || named(entry, names) {
+                    found.append(Leftover(url: support.appendingPathComponent(vendorFolder).appendingPathComponent(entry), kind: "Support files"))
+                }
+            }
+        }
+        var unique: [Leftover] = []
+        for leftover in found where !unique.contains(where: { $0.url.path == leftover.url.path }) { unique.append(leftover) }
+        let usages = Catalog.measure(unique.map(\.url), cancel: cancel)
+        return unique.enumerated().map { index, leftover in
+            var measured = leftover
+            measured.usage = usages[index]
+            return measured
+        }.sorted { $0.usage.bytes > $1.usage.bytes }
+    }
+
+    /// Looks like a bundle identifier: three or more dot-separated parts, starting with a letter.
+    static func looksLikeIdentifier(_ text: String) -> Bool {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count >= 3, let first = text.first, first.isLetter else { return false }
+        return parts.allSatisfy { part in !part.isEmpty && part.allSatisfy { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" } }
+    }
+
+    /// The bundle identifier an entry in ~/Library is named after, if any.
+    public static func identifier(in entry: String) -> String? {
+        var name = entry
+        for suffix in [".plist", ".savedState", ".binarycookies"] where name.hasSuffix(suffix) { name.removeLast(suffix.count) }
+        guard looksLikeIdentifier(name), !name.hasPrefix("com.apple."), !name.hasPrefix("group."), !name.hasPrefix("systemgroup.") else { return nil }
+        return name
+    }
+
+    /// Entries in ~/Library named after a bundle identifier that no installed app, helper or running process has.
+    /// Folders named after an app's display name can't be tied to an app reliably and are never listed.
+    ///
+    /// - Parameter inUse: whether an identifier belongs to something on this Mac. Called with the identifier and
+    ///   each shorter prefix of three or more parts, so "com.vendor.app.helper" is kept while "com.vendor.app" exists.
+    public static func orphans(home: URL, fullDiskAccess: Bool, cancel: Cancellation, inUse: (String) -> Bool) -> [Orphan] {
+        var groups: [String: [Leftover]] = [:]
+        var verdicts: [String: Bool] = [:]
+        func owned(_ id: String) -> Bool {
+            if let known = verdicts[id] { return known }
+            var parts = id.split(separator: ".").map(String.init)
+            var result = false
+            while parts.count >= 3 {
+                if inUse(parts.joined(separator: ".")) { result = true; break }
+                parts.removeLast()
+            }
+            verdicts[id] = result
+            return result
+        }
+        for place in places where (fullDiskAccess || !place.guarded) && place.folder != "Library/LaunchAgents" {
+            let folder = home.appendingPathComponent(place.folder)
+            for entry in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] {
+                guard let id = identifier(in: entry), !owned(id) else { continue }
+                // ByHost settings carry the Mac's hardware UUID after the identifier.
+                var key = id
+                if place.folder.hasSuffix("ByHost"), let range = key.range(of: ".", options: .backwards) { key = String(key[..<range.lowerBound]) }
+                groups[key, default: []].append(Leftover(url: folder.appendingPathComponent(entry), kind: place.kind))
+            }
+        }
+        // Settings and support files of one app often go by slightly different identifiers ("com.x.app" and
+        // "com.x.app.helper"); file each under the shortest one that is also orphaned.
+        let ids = groups.keys.sorted { $0.count < $1.count }
+        var merged: [String: [Leftover]] = [:]
+        for id in ids {
+            let parent = merged.keys.first { id.hasPrefix($0 + ".") }
+            merged[parent ?? id, default: []] += groups[id] ?? []
+        }
+        let all = merged.flatMap { id, leftovers in leftovers.map { (id, $0) } }
+        let usages = Catalog.measure(all.map(\.1.url), cancel: cancel)
+        var measured: [String: [Leftover]] = [:]
+        for (index, pair) in all.enumerated() {
+            var leftover = pair.1
+            leftover.usage = usages[index]
+            measured[pair.0, default: []].append(leftover)
+        }
+        return measured.map { id, leftovers in
+            Orphan(bundleID: id, leftovers: leftovers.sorted { $0.usage.bytes > $1.usage.bytes },
+                   newest: leftovers.compactMap { Catalog.modified($0.url) }.max())
+        }.sorted { $0.bytes > $1.bytes }
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "repository": "lumen-xx/spare-releases",
+  "feed_url": "https://raw.githubusercontent.com/lumen-xx/spare-releases/main/appcast.xml",
+  "public_key": "",
+  "keychain_account": "spare"
+}
