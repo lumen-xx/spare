@@ -21,10 +21,17 @@ if gh release view "v$VERSION" --repo "$REPOSITORY" >/dev/null 2>&1; then
     exit 1
 fi
 rm -f "$RELEASE_DIR/appcast.xml"
-# Retain previous signed feed entries without editing their signed contents.
-LATEST_TAG="$(gh release list --repo "$REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty')"
+# Retain previous signed feed entries without editing their signed contents. Until the source repository has a
+# release, the feed continues from the repository releases were published in before.
+FEED_REPOSITORY="$REPOSITORY"
+LATEST_TAG="$(gh release list --repo "$FEED_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty')"
+LEGACY="$(python3 -c 'import json; print(json.load(open("updates/config.json")).get("legacy_repository", ""))')"
+if [ -z "$LATEST_TAG" ] && [ -n "$LEGACY" ]; then
+    FEED_REPOSITORY="$LEGACY"
+    LATEST_TAG="$(gh release list --repo "$FEED_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // empty')"
+fi
 if [ -n "$LATEST_TAG" ]; then
-    gh release download "$LATEST_TAG" --repo "$REPOSITORY" --pattern appcast.xml --dir "$RELEASE_DIR" --clobber
+    gh release download "$LATEST_TAG" --repo "$FEED_REPOSITORY" --pattern appcast.xml --dir "$RELEASE_DIR" --clobber
     python3 - "$RELEASE_DIR/appcast.xml" "$BUILD" <<'PYORDER'
 import sys, xml.etree.ElementTree as ET
 versions = [int(n.text) for n in ET.parse(sys.argv[1]).getroot().iter('{http://www.andymatuschak.org/xml-namespaces/sparkle}version')]

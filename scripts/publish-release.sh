@@ -4,8 +4,9 @@ cd "$(dirname "$0")/.."
 VERSION="${1:?Usage: bash scripts/publish-release.sh VERSION}"
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then exit 1; fi
 REPOSITORY="$(python3 -c 'import json; print(json.load(open("updates/config.json"))["repository"])')"
+LEGACY="$(python3 -c 'import json; print(json.load(open("updates/config.json")).get("legacy_repository", ""))')"
 RELEASE_DIR="dist/releases/$VERSION"
-if [ ! -f "$RELEASE_DIR/appcast.xml" ] || [ ! -f "$RELEASE_DIR/Spare-$VERSION.zip" ]; then
+if [ ! -f "$RELEASE_DIR/appcast.xml" ] || [ ! -f "$RELEASE_DIR/Spare-$VERSION.zip" ] || [ ! -f docs/RELEASE_NOTES.md ]; then
     echo "Prepare and verify this release first." >&2
     exit 1
 fi
@@ -16,33 +17,22 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
 PYBUILD
 )"
 python3 scripts/verify-release.py "$RELEASE_DIR/appcast.xml" "$RELEASE_DIR/Spare-$VERSION.zip" "$BUILD"
-FEED_CHECKOUT="$(pwd)/work/releases-repository"
-if [ ! -d "$FEED_CHECKOUT/.git" ]; then
-    gh repo clone "$REPOSITORY" "$FEED_CHECKOUT"
-fi
-git -C "$FEED_CHECKOUT" checkout -B main
-if ! git -C "$FEED_CHECKOUT" rev-parse HEAD >/dev/null 2>&1; then
-    cp docs/RELEASE_README.md "$FEED_CHECKOUT/README.md"
-    git -C "$FEED_CHECKOUT" add README.md
-    git -C "$FEED_CHECKOUT" commit -m "Initialize binary releases repository"
-    git -C "$FEED_CHECKOUT" push -u origin main
-else
-    git -C "$FEED_CHECKOUT" pull --ff-only origin main
-fi
-# GitHub release creation is explicit; preparation never publishes.
+# The app and its signed feed are assets of the release; the feed URL is releases/latest/download/appcast.xml.
 gh release create "v$VERSION" \
     "$RELEASE_DIR/Spare-$VERSION.zip" "$RELEASE_DIR/appcast.xml" \
     --repo "$REPOSITORY" --title "Spare $VERSION" \
-    --notes-file docs/RELEASE_NOTES.md
-cp "$RELEASE_DIR/appcast.xml" "$FEED_CHECKOUT/appcast.xml"
-# The release page describes the current version, with its screenshots.
-cp docs/RELEASE_README.md "$FEED_CHECKOUT/README.md"
-# A missing screenshot mustn't stop the feed from going out; the page keeps the ones it has.
-if compgen -G "docs/images/*.png" >/dev/null; then
-    mkdir -p "$FEED_CHECKOUT/images"
-    cp docs/images/*.png "$FEED_CHECKOUT/images/"
+    --notes-file docs/RELEASE_NOTES.md --latest
+# Builds up to 0.3.1 read their feed from the old releases repository. It gets the same signed feed, whose downloads
+# point here, so those copies update to a build that reads the new feed.
+if [ -n "$LEGACY" ]; then
+    LEGACY_CHECKOUT="$(pwd)/work/legacy-feed"
+    [ -d "$LEGACY_CHECKOUT/.git" ] || gh repo clone "$LEGACY" "$LEGACY_CHECKOUT"
+    git -C "$LEGACY_CHECKOUT" pull --ff-only origin main
+    cp "$RELEASE_DIR/appcast.xml" "$LEGACY_CHECKOUT/appcast.xml"
+    cp docs/LEGACY_README.md "$LEGACY_CHECKOUT/README.md"
+    git -C "$LEGACY_CHECKOUT" add appcast.xml README.md
+    if ! git -C "$LEGACY_CHECKOUT" diff --cached --quiet; then
+        git -C "$LEGACY_CHECKOUT" commit -m "Spare $VERSION: downloads and updates now come from $REPOSITORY"
+        git -C "$LEGACY_CHECKOUT" push origin HEAD:main
+    fi
 fi
-git -C "$FEED_CHECKOUT" add appcast.xml README.md
-[ -d "$FEED_CHECKOUT/images" ] && git -C "$FEED_CHECKOUT" add images
-git -C "$FEED_CHECKOUT" commit -m "Publish signed Spare $VERSION appcast"
-git -C "$FEED_CHECKOUT" push -u origin main

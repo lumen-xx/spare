@@ -156,14 +156,14 @@ check(service?.schedule == "Always running" && service?.note?.contains("brew ser
 let printed = """
     gui/501 = {
     \tservices = {
-    \t\t   64571      - \tapplication.cc.ffitch.shottr.63416020.63416029
+    \t\t   4242      - \tapplication.com.example.screenshots.1000.1001
     \t\t       0      0 \tcom.vendor.agent
     \t}
     }
     """
 let services = Launchd.parse(printed)
 check(services["com.vendor.agent"] == Launchd.Status(loaded: true, pid: nil), "reads a loaded job that isn't running")
-check(services["application.cc.ffitch.shottr.63416020.63416029"]?.pid == 64571, "reads a running job's process")
+check(services["application.com.example.screenshots.1000.1001"]?.pid == 4242, "reads a running job's process")
 
 let disabledJobs = Launchd.parseDisabled("\tdisabled services = {\n\t\t\"com.docker.helper\" => enabled\n\t\t\"homebrew.mxcl.redis\" => disabled\n\t\t\"old.style\" => true\n\t}\n")
 check(disabledJobs == ["com.docker.helper": false, "homebrew.mxcl.redis": true, "old.style": true], "reads which jobs are turned off")
@@ -208,11 +208,11 @@ check(!Catalog.isSystemService("Zed") && !Catalog.isSystemService("bun") && !Cat
 
 let btm = """
     ========================
-     Records for UID 501 : B0048BD8
+     Records for UID 501 : 00000001
     ========================
 
      #1:
-                     UUID: F88247B4
+                     UUID: 00000002
                      Name: postgres
            Developer Name: (null)
                      Type: legacy agent (0x10008)
@@ -221,16 +221,16 @@ let btm = """
                       URL: /Users/501/Library/LaunchAgents/homebrew.mxcl.postgresql@17.plist
 
      #2:
-                     UUID: 2C4B5EF1
-                     Name: Alcove
-           Developer Name: Henrik Ruscon
+                     UUID: 00000003
+                     Name: Notch
+           Developer Name: Example Developer
                      Type: app (0x2)
               Disposition: [disabled, allowed, not notified] (0x2)
-               Identifier: 2.com.henrikruscon.Alcove
-                      URL: /Applications/Alcove.app
-        Bundle Identifier: com.henrikruscon.Alcove
+               Identifier: 2.com.example.Notch
+                      URL: /Applications/Notch.app
+        Bundle Identifier: com.example.Notch
     ========================
-     Records for UID 502 : 571DA6F9
+     Records for UID 502 : 00000004
     ========================
 
      #1:
@@ -242,7 +242,7 @@ let btm = """
     """
 let records = LoginItems.parse(btm, uid: 501)
 check(records.count == 2 && records[0].isLegacy && records[0].enabled && records[0].allowed, "reads login records of one account only")
-check(records[1].developer == "Henrik Ruscon" && !records[1].enabled && records[1].bundleID == "com.henrikruscon.Alcove" && !records[1].opensAtLogin,
+check(records[1].developer == "Example Developer" && !records[1].enabled && records[1].bundleID == "com.example.Notch" && !records[1].opensAtLogin,
       "reads a disabled app record, telling disabled from enabled")
 
 let brewJSON = Data("""
@@ -339,9 +339,9 @@ let accounts = SystemChanges.accounts(list: accountList, me: "lumen") { name in
 check(accounts.count == 2 && accounts[0].action == .deleteAccount("_BGMXPCHelper") && accounts[0].name == "Background Music XPC Helper"
       && accounts[1].action == .settings(SystemChanges.usersSettings) && !accounts[1].removable,
       "offers to delete an installer's hidden account, never a person's or macOS's")
-let printers = SystemChanges.printers(devices: "device for HP_Laser_MFP: dnssd://HP%20Laser._ipp._tcp.local./?uuid=1\n", states: "printer HP_Laser_MFP is idle.  enabled since Tue\n")
-check(printers.first?.name == "HP Laser MFP" && printers.first?.state == "Idle" && printers.first?.action == .deletePrinter("HP_Laser_MFP"), "reads added printers")
-let vpns = SystemChanges.vpns("Available network connection services in the current set (*=enabled):\n* (Connected)      32F36715-1592 VPN (io.tailscale.ipn.macsys) \"Tailscale\"   [VPN:io.tailscale.ipn.macsys]\n") { $0 == "io.tailscale.ipn.macsys" ? "Tailscale" : nil }
+let printers = SystemChanges.printers(devices: "device for Office_Printer: dnssd://Office%20Printer._ipp._tcp.local./?uuid=1\n", states: "printer Office_Printer is idle.  enabled since Tue\n")
+check(printers.first?.name == "Office Printer" && printers.first?.state == "Idle" && printers.first?.action == .deletePrinter("Office_Printer"), "reads added printers")
+let vpns = SystemChanges.vpns("Available network connection services in the current set (*=enabled):\n* (Connected)      00000000-0000 VPN (io.tailscale.ipn.macsys) \"Tailscale\"   [VPN:io.tailscale.ipn.macsys]\n") { $0 == "io.tailscale.ipn.macsys" ? "Tailscale" : nil }
 check(vpns.first?.name == "Tailscale" && vpns.first?.state == "Connected" && vpns.first?.owner == "Tailscale" && vpns.first?.ownerGone == false, "reads VPN configurations and their app")
 check(SystemChanges.profiles("There are no configuration profiles installed for user 'lumen'").isEmpty
       && SystemChanges.profiles("_computerlevel[1] attribute: profileIdentifier: com.vendor.mdm\n").first?.detail == "For the whole Mac", "reads configuration profiles")

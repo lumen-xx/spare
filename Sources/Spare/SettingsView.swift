@@ -56,13 +56,13 @@ struct SettingsView: View {
             } footer: {
                 // As in Strand and Dice: who makes it, which version this is, and where releases live.
                 HStack(alignment: .bottom) {
-                    Text("© \(String(Calendar.current.component(.year, from: Date()))) opyuii\nAll rights reserved.")
+                    Text("© \(String(Calendar.current.component(.year, from: Date()))) opyuii\nOpen source under the MIT License.")
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("Version \(version) (\(build))").foregroundStyle(.secondary).textSelection(.enabled)
                         HStack(spacing: 10) {
-                            Link("GitHub", destination: URL(string: "https://github.com/lumen-xx/spare-releases")!)
+                            Link("GitHub", destination: URL(string: "https://github.com/lumen-xx/spare")!)
                             Link("opyuii.com", destination: URL(string: "https://opyuii.com")!)
                         }
                     }

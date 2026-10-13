@@ -9,6 +9,16 @@ An honest Mac cleaner for Apple silicon, macOS 14 or newer. It shows what takes 
 | ![Apps](docs/images/apps.png) | ![Background Items](docs/images/background.png) |
 | ![Packages](docs/images/packages.png) | |
 
+## Install
+
+macOS 14 or newer · Apple silicon
+
+1. [Download Spare](https://github.com/lumen-xx/spare/releases/latest), unzip it and move **Spare.app** to **Applications**.
+2. Open it. If macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Spare.app`. Spare is signed but not notarized yet.
+3. Optional: give it **Full Disk Access** so it can also look at Downloads, iPhone backups and other apps' data. Without it, Spare skips the folders macOS protects and says which.
+
+Spare is open source under the [MIT License](LICENSE). It never deletes anything itself: everything goes to the Trash, and History can put it back. It has no background process and only goes online when you check for updates.
+
 Screenshots in docs/images are made from sample data: `swift build`, run `.build/debug/Spare -demo YES -section Cleanup -AppleLocale en_US`, capture the window, then `swift scripts/marketing.swift <window.png> <out.png> <headline> <subtitle> work/marketing/icon.png`.
 
 ## What it does
@@ -65,13 +75,17 @@ The app is arm64 with embedded Sparkle 2.10.0, bundle id com.opyuii.spare, and s
 
 ## Releases
 
-Download: https://github.com/lumen-xx/spare-releases/releases/latest. The raw appcast is https://raw.githubusercontent.com/lumen-xx/spare-releases/main/appcast.xml; automatic checks are opt-in.
+Releases are published here, with the signed appcast as a release asset: https://github.com/lumen-xx/spare/releases/latest/download/appcast.xml. Automatic checks are opt-in.
 
-`updates/config.json` holds the feed and public key; the private key lives only in the login Keychain under account `spare`. `updates/signing-certificate.txt` pins the code signing certificate so Full Disk Access survives updates. Do not generate a replacement for either on an existing release stream. docs/RELEASE_README.md is the release repository's README.
+`updates/config.json` holds the feed and public key; the private key lives only in the login Keychain under account `spare`. `updates/signing-certificate.txt` pins the code signing certificate so Full Disk Access survives updates. Do not generate a replacement for either on an existing release stream.
 
 ```sh
 bash scripts/prepare-release.sh 0.1.1 2
 bash scripts/publish-release.sh 0.1.1
 ```
 
-Build numbers must increase. Source stays private in lumen-xx/spare; binaries are public in lumen-xx/spare-releases.
+Build numbers must increase. Versions up to 0.3.1 were published in lumen-xx/spare-releases and read their feed from there; publishing copies each new signed feed into it (with docs/LEGACY_README.md as its README), so those copies update to a build that reads the feed here.
+
+## License
+
+[MIT](LICENSE). Third-party notices, including Sparkle's, are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

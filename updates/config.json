@@ -1,6 +1,7 @@
 {
-  "repository": "lumen-xx/spare-releases",
-  "feed_url": "https://raw.githubusercontent.com/lumen-xx/spare-releases/main/appcast.xml",
+  "repository": "lumen-xx/spare",
+  "feed_url": "https://github.com/lumen-xx/spare/releases/latest/download/appcast.xml",
   "public_key": "8Kb1Fe19s+D7/lljahf2XI9/T6J+Sd1ANNDP6MDdx+Q=",
-  "keychain_account": "spare"
+  "keychain_account": "spare",
+  "legacy_repository": "lumen-xx/spare-releases"
 }

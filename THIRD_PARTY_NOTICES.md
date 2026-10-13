@@ -136,13 +136,3 @@ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
 STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
 IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 POSSIBILITY OF SUCH DAMAGE.
-
-## Apple product photography
-
-Product photographs in Sources/Strand/Resources/ConnectionImages are sourced from Apple Store product pages and Apple's image CDN, at the user's request. Copyright Apple Inc. MagSafe 3, Thunderbolt 4 Pro and Thunderbolt 5 Pro are edited overhead illustrations based on those photographs, not original Apple camera views; see docs/PRODUCT_IMAGES.md. These images are not covered by Sparkle's licence or Strand's source licence. Original source URLs are retained in ConnectionImages/sources.json. No endorsement or identified Apple hardware is implied by the category illustrations.
-
-## Bricolage Grotesque
-
-Bricolage Grotesque is bundled under the SIL Open Font License 1.1. Copyright and full license: `Sources/Strand/Resources/Fonts/OFL.txt`. Source: https://github.com/google/fonts/tree/main/ofl/bricolagegrotesque.
-
-Ethernet photo reference from PNGitem: https://www.pngitem.com/middle/TmhiRih_ethernet-cable-png-transparent-png/ . Edited to remove its background for the representative cable visual.
