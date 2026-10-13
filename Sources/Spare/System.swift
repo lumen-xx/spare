@@ -200,7 +200,7 @@ enum AdminTrash {
         // Each step may fail on its own without stopping the rest; what actually moved is checked afterwards.
         let command = (before + moves + after).map { "(\($0)) 2>/dev/null" }.joined(separator: "; ") + "; true"
         if let problem = Privileged.run(command, prompt: prompt) {
-            if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem) }
+            if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem, failed: true) }
             return nil
         }
         return planned.compactMap { source, target in

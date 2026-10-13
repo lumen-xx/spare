@@ -37,7 +37,7 @@ final class SystemDataModel: ObservableObject {
         guard !stamps.isEmpty else { return }
         let command = stamps.map { "tmutil deletelocalsnapshots \($0)" }.joined(separator: "; ")
         if let problem = Privileged.run(command, prompt: "Spare wants to delete \(stamps.count == 1 ? "a Time Machine snapshot" : "\(stamps.count) Time Machine snapshots").") {
-            if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't delete the snapshots", detail: problem) }
+            if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't delete the snapshots", detail: problem, failed: true) }
         } else {
             Shared.shared.banner = .init(title: stamps.count == 1 ? "Deleted 1 snapshot" : "Deleted \(stamps.count) snapshots",
                                          detail: "Your Time Machine backups on the backup disk aren't affected.")

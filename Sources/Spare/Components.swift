@@ -127,13 +127,15 @@ struct FullDiskAccessNote: View {
 struct BannerView: View {
     @ObservedObject var shared = Shared.shared
     @State private var showingProblems = false
+    @State private var hovering = false
 
     var body: some View {
         if let banner = shared.banner {
+            let warning = banner.failed || !banner.problems.isEmpty
             HStack(spacing: 12) {
-                Image(systemName: banner.problems.isEmpty ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                Image(systemName: warning ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
                     .font(.system(size: 18))
-                    .foregroundStyle(banner.problems.isEmpty ? Color.green : Color.orange)
+                    .foregroundStyle(warning ? Color.orange : Color.green)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(banner.title).font(.system(size: 13, weight: .semibold))
                     if let detail = banner.detail { Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary) }
@@ -162,6 +164,16 @@ struct BannerView: View {
             .frame(maxWidth: 760)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .id(banner.id)
+            .onHover { hovering = $0 }
+            // Gone after two seconds, but not while the pointer is on it or its details are open, so Undo stays reachable.
+            .task(id: banner.id) {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                while (hovering || showingProblems) && !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                }
+                guard !Task.isCancelled, shared.banner?.id == banner.id else { return }
+                withAnimation(.snappy) { shared.banner = nil }
+            }
         }
     }
 }

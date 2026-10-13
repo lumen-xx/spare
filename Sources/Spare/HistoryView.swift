@@ -98,7 +98,7 @@ struct RecordRow: View {
             case .inTrash:
                 Button("Put Back") {
                     let problems = model.putBack([record])
-                    if !problems.isEmpty { Shared.shared.banner = .init(title: "Couldn't put it back", detail: nil, problems: problems) }
+                    if !problems.isEmpty { Shared.shared.banner = .init(title: "Couldn't put it back", detail: nil, problems: problems, failed: true) }
                 }
                 .controlSize(.small)
             case .putBack:

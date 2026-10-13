@@ -236,7 +236,7 @@ final class StartupModel: ObservableObject {
             }.joined(separator: "; ") + "; true"
             if let problem = Privileged.run(command, prompt: "Spare wants to turn \(on ? "on" : "off") \(system.count == 1 ? "a system service" : "\(system.count) system services")."),
                problem != "Cancelled." {
-                Shared.shared.banner = .init(title: "Couldn't change it", detail: problem)
+                Shared.shared.banner = .init(title: "Couldn't change it", detail: problem, failed: true)
             }
         }
         load()

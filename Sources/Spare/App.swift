@@ -41,6 +41,14 @@ struct SpareApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { Updates.shared.start() }
+        #if DEBUG
+        // Shows a sample message, to check how messages look and leave.
+        if UserDefaults.standard.bool(forKey: "previewBanner") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                Shared.shared.banner = .init(title: "The Trash wasn't emptied", detail: "Sample message", failed: true)
+            }
+        }
+        #endif
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }

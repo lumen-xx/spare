@@ -317,6 +317,18 @@ write("volume/Applications/Client.app/Contents/Info.plist", bytes: 10)
 let bundlePlan = Receipts.plan(id: "client", volume: volume, location: "Applications/Client.app", files: ["Contents", "Contents/Info.plist"])
 check(bundlePlan.roots.map(\.lastPathComponent) == ["Client.app"], "a package installed into an app takes the whole app (\(bundlePlan.roots.map(\.path)))")
 
+// Emptying a Trash: a plain file, a locked file and a read-only folder all go.
+let fakeTrash = folder("fake-trash")
+write("fake-trash/plain.bin", bytes: 100)
+let lockedFile = write("fake-trash/locked.bin", bytes: 100)
+chflags(lockedFile.path, UInt32(UF_IMMUTABLE))
+write("fake-trash/readonly/inside.bin", bytes: 100)
+chmod(fakeTrash.appendingPathComponent("readonly").path, 0o555)
+let emptied = TrashEmptier.empty(fakeTrash)
+check(emptied.removed == 3 && emptied.needsAdministrator.isEmpty && emptied.failed.isEmpty
+      && (try? fm.contentsOfDirectory(atPath: fakeTrash.path))?.isEmpty == true,
+      "empties a Trash folder, unlocking locked files and read-only folders (\(emptied.removed) removed)")
+
 // MARK: Catalog
 
 check(Set(Catalog.rules.map(\.id)).count == Catalog.rules.count, "every rule has its own identifier")

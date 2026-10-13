@@ -117,7 +117,7 @@ final class PackagesModel: ObservableObject {
         load()
         Shared.shared.refreshSpace()
         Shared.shared.banner = .init(title: removed.isEmpty ? "Nothing was uninstalled" : "Uninstalled \(removed.count == 1 ? removed[0] : "\(removed.count) packages")",
-                                     detail: removed.isEmpty ? nil : "Package managers delete directly, so these aren't in the Trash.", problems: problems)
+                                     detail: removed.isEmpty ? nil : "Package managers delete directly, so these aren't in the Trash.", problems: problems, failed: removed.isEmpty)
     }
 
     func autoremove() async {
@@ -128,7 +128,7 @@ final class PackagesModel: ObservableObject {
         let count = unused.count
         load()
         Shared.shared.banner = .init(title: result.succeeded ? "Removed \(count == 1 ? "1 unused formula" : "\(count) unused formulae")" : "Homebrew couldn't clean up",
-                                     detail: result.succeeded ? nil : String(result.output.suffix(300)))
+                                     detail: result.succeeded ? nil : String(result.output.suffix(300)), failed: !result.succeeded)
     }
 }
 

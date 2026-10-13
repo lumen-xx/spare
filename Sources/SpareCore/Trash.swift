@@ -99,3 +99,49 @@ public final class TrashHistory {
         try? data.write(to: file, options: .atomic)
     }
 }
+
+/// Empties a Trash folder for good, item by item, so one stubborn item doesn't stop the rest the way it stops
+/// Finder. Locked files and read-only folders of the person's own are unlocked first; what still can't be deleted
+/// (usually items owned by the system) is handed back for an administrator to remove.
+public enum TrashEmptier {
+    public struct Result: Sendable {
+        public var removed = 0
+        /// Items only an administrator can delete.
+        public var needsAdministrator: [URL] = []
+        /// Items that couldn't be deleted at all, with why.
+        public var failed: [(URL, String)] = []
+    }
+
+    public static func empty(_ trash: URL) -> Result {
+        var result = Result()
+        let items = (try? FileManager.default.contentsOfDirectory(at: trash, includingPropertiesForKeys: nil, options: [])) ?? []
+        for item in items {
+            if delete(item) { result.removed += 1; continue }
+            unlock(item)
+            do {
+                try FileManager.default.removeItem(at: item)
+                result.removed += 1
+            } catch where Trash.isPermission(error) {
+                result.needsAdministrator.append(item)
+            } catch {
+                result.failed.append((item, error.localizedDescription))
+            }
+        }
+        return result
+    }
+
+    static func delete(_ url: URL) -> Bool { (try? FileManager.default.removeItem(at: url)) != nil }
+
+    /// Clears the "locked" flag and gives the owner write access throughout, which deleting needs.
+    static func unlock(_ url: URL) {
+        for (tool, arguments) in [("/usr/bin/chflags", ["-R", "nouchg", url.path]), ("/bin/chmod", ["-R", "u+rwX", url.path])] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: tool)
+            process.arguments = arguments
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try? process.run()
+            process.waitUntilExit()
+        }
+    }
+}

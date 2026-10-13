@@ -96,7 +96,7 @@ final class ExtensionsModel: ObservableObject {
         if parts.isEmpty {
             // Nothing left on the disk: only the receipts go.
             if let problem = Privileged.run(after.joined(separator: "; ") + "; true", prompt: prompt) {
-                if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem) }
+                if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem, failed: true) }
                 return nil
             }
             return 0

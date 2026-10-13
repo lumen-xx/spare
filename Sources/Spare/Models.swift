@@ -38,6 +38,8 @@ final class Shared: ObservableObject {
         var session: UUID?
         var problems: [String] = []
         var offerEmptyTrash = false
+        /// Something didn't work: shown with a warning instead of a tick.
+        var failed = false
     }
 
     @Published private(set) var space: Volume.Space?
@@ -77,7 +79,7 @@ final class Shared: ObservableObject {
                             detail: "The space comes back when you empty the Trash.",
                             session: session.id, problems: problems, offerEmptyTrash: true)
         } else if !problems.isEmpty {
-            banner = Banner(title: problems.count == 1 ? "Couldn't move 1 item" : "Couldn't move \(problems.count) items", detail: nil, problems: problems)
+            banner = Banner(title: problems.count == 1 ? "Couldn't move 1 item" : "Couldn't move \(problems.count) items", detail: nil, problems: problems, failed: true)
         }
     }
 
@@ -90,14 +92,40 @@ final class Shared: ObservableObject {
         alert.addButton(withTitle: "Cancel")
         alert.buttons.first?.hasDestructiveAction = true
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        if let problem = Privileged.emptyTrash() {
-            banner = Banner(title: "The Trash wasn't emptied", detail: problem)
-        } else {
-            banner = Banner(title: "Emptied the Trash", detail: nil)
+        guard fullDiskAccess else {
+            // Without Full Disk Access macOS hides the Trash's contents from Spare, so Finder has to do it.
+            if let problem = Privileged.emptyTrash() {
+                banner = Banner(title: "The Trash wasn't emptied", detail: problem + " Giving Spare Full Disk Access lets it empty the Trash itself.", failed: true)
+            } else {
+                banner = Banner(title: "Emptied the Trash", detail: nil)
+            }
             HistoryModel.shared.refresh()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self.refreshSpace() }
+            refreshSpace()
+            return
         }
-        refreshSpace()
+        let before = space?.free ?? 0
+        Task {
+            // Item by item, so one item Finder would stop at doesn't keep the rest.
+            var result = await background { TrashEmptier.empty(home.appendingPathComponent(".Trash")) }
+            if !result.needsAdministrator.isEmpty {
+                let command = "rm -rf " + result.needsAdministrator.map { Privileged.quoted($0.path) }.joined(separator: " ")
+                if let problem = Privileged.run(command, prompt: "Spare wants to delete items in the Trash that belong to the system."), problem != "Cancelled." {
+                    result.failed += result.needsAdministrator.map { ($0, problem) }
+                } else {
+                    let left = result.needsAdministrator.filter { FileManager.default.fileExists(atPath: $0.path) }
+                    result.removed += result.needsAdministrator.count - left.count
+                    result.failed += left.map { ($0, "Still there; it needs an administrator to delete.") }
+                }
+            }
+            self.refreshSpace()
+            HistoryModel.shared.refresh()
+            let freed = max(0, (self.space?.free ?? before) - before)
+            let problems = result.failed.map { "\($0.0.lastPathComponent): \($0.1)" }
+            self.banner = problems.isEmpty
+                ? Banner(title: "Emptied the Trash", detail: freed > 0 ? "\(Bytes.text(freed)) is free again." : nil)
+                : Banner(title: result.removed > 0 ? "Emptied the Trash, except \(problems.count == 1 ? "1 item" : "\(problems.count) items")" : "The Trash wasn't emptied",
+                         detail: nil, problems: problems, failed: true)
+        }
     }
 }
 
@@ -432,7 +460,7 @@ final class AppsModel: ObservableObject {
             running.forEach { $0.terminate() }
             for _ in 0..<30 where running.contains(where: { !$0.isTerminated }) { try? await Task.sleep(nanoseconds: 200_000_000) }
             if running.contains(where: { !$0.isTerminated }) {
-                Shared.shared.banner = .init(title: "\(app.name) is still open", detail: "Quit it, then uninstall again.")
+                Shared.shared.banner = .init(title: "\(app.name) is still open", detail: "Quit it, then uninstall again.", failed: true)
                 return
             }
         }
@@ -536,7 +564,7 @@ final class HistoryModel: ObservableObject {
         let problems = putBack(session.records)
         Shared.shared.banner = problems.isEmpty
             ? .init(title: "Put back \(session.title.lowercased().hasPrefix("cleanup") ? "everything from that cleanup" : "everything")", detail: nil)
-            : .init(title: "Some items couldn't be put back", detail: nil, problems: problems)
+            : .init(title: "Some items couldn't be put back", detail: nil, problems: problems, failed: true)
         // What was put back can be found again.
         if session.title == "Cleanup" { CleanupModel.shared.scanIfStarted() }
         if session.title.hasPrefix("Uninstalled") || session.title.hasPrefix("Leftovers") { AppsModel.shared.load() }
