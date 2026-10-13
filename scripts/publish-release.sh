@@ -37,8 +37,12 @@ gh release create "v$VERSION" \
 cp "$RELEASE_DIR/appcast.xml" "$FEED_CHECKOUT/appcast.xml"
 # The release page describes the current version, with its screenshots.
 cp docs/RELEASE_README.md "$FEED_CHECKOUT/README.md"
-mkdir -p "$FEED_CHECKOUT/images"
-cp docs/images/*.png "$FEED_CHECKOUT/images/"
-git -C "$FEED_CHECKOUT" add appcast.xml README.md images
+# A missing screenshot mustn't stop the feed from going out; the page keeps the ones it has.
+if compgen -G "docs/images/*.png" >/dev/null; then
+    mkdir -p "$FEED_CHECKOUT/images"
+    cp docs/images/*.png "$FEED_CHECKOUT/images/"
+fi
+git -C "$FEED_CHECKOUT" add appcast.xml README.md
+[ -d "$FEED_CHECKOUT/images" ] && git -C "$FEED_CHECKOUT" add images
 git -C "$FEED_CHECKOUT" commit -m "Publish signed Spare $VERSION appcast"
 git -C "$FEED_CHECKOUT" push -u origin main
