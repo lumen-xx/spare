@@ -35,9 +35,13 @@ The app is arm64 with embedded Sparkle 2.10.0, bundle id com.opyuii.spare, and s
 
 ## Releases
 
-Not published yet. Before the first release, create the update key with `.build/artifacts/sparkle/Sparkle/bin/generate_keys --account spare`, put its public key into updates/config.json, record the signing certificate leaf in updates/signing-certificate.txt, and create lumen-xx/spare-releases. Then:
+Download: https://github.com/lumen-xx/spare-releases/releases/latest. The raw appcast is https://raw.githubusercontent.com/lumen-xx/spare-releases/main/appcast.xml; automatic checks are opt-in.
+
+`updates/config.json` holds the feed and public key; the private key lives only in the login Keychain under account `spare`. `updates/signing-certificate.txt` pins the code signing certificate so Full Disk Access survives updates. Do not generate a replacement for either on an existing release stream. docs/RELEASE_README.md is the release repository's README.
 
 ```sh
-bash scripts/prepare-release.sh 0.1.0 1
-bash scripts/publish-release.sh 0.1.0
+bash scripts/prepare-release.sh 0.1.1 2
+bash scripts/publish-release.sh 0.1.1
 ```
+
+Build numbers must increase. Source stays private in lumen-xx/spare; binaries are public in lumen-xx/spare-releases.

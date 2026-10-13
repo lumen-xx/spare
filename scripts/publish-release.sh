@@ -22,7 +22,7 @@ if [ ! -d "$FEED_CHECKOUT/.git" ]; then
 fi
 git -C "$FEED_CHECKOUT" checkout -B main
 if ! git -C "$FEED_CHECKOUT" rev-parse HEAD >/dev/null 2>&1; then
-    printf '%s\n' '# Spare releases' 'Binary releases and signed update feed. Source is maintained privately.' > "$FEED_CHECKOUT/README.md"
+    cp docs/RELEASE_README.md "$FEED_CHECKOUT/README.md"
     git -C "$FEED_CHECKOUT" add README.md
     git -C "$FEED_CHECKOUT" commit -m "Initialize binary releases repository"
     git -C "$FEED_CHECKOUT" push -u origin main
