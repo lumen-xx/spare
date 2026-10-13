@@ -56,7 +56,11 @@ final class Shared: ObservableObject {
         if access != fullDiskAccess {
             fullDiskAccess = access
             // Newly visible folders change what there is to find.
-            if access { CleanupModel.shared.scanIfStarted() }
+            if access {
+                CleanupModel.shared.scanIfStarted()
+                SpaceModel.shared.reloadIfStarted()
+                AppsModel.shared.loadIfStarted()
+            }
         }
         guard access else { trashBytes = nil; return }
         Task {
@@ -254,6 +258,8 @@ final class SpaceModel: ObservableObject {
         load()
     }
 
+    func reloadIfStarted() { if started { reload() } }
+
     func reload() {
         sizes = [:]
         complete = []
@@ -351,6 +357,7 @@ final class AppsModel: ObservableObject {
     private var started = false
 
     func startIfNeeded() { if !started { load() } }
+    func loadIfStarted() { if started { load() } }
 
     func load() {
         started = true
@@ -395,7 +402,9 @@ final class AppsModel: ObservableObject {
                     var parts = label.split(separator: ".").map(String.init)
                     while parts.count >= 3 { jobs.insert(parts.joined(separator: ".")); parts.removeLast() }
                 }
-                return Apps.orphans(home: home, fullDiskAccess: fullDiskAccess, cancel: Cancellation()) { id in
+                let companies = Set((Array(installed) + Array(running) + labels).map { $0.split(separator: ".").prefix(2).joined(separator: ".") })
+                return Apps.orphans(home: home, fullDiskAccess: fullDiskAccess, cancel: Cancellation(),
+                                    companyInUse: { companies.contains($0) }) { id in
                     installed.contains(id) || running.contains(id) || jobs.contains(id) || AppLookup.url(for: id) != nil
                 }
             }

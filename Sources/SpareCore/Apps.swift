@@ -152,7 +152,12 @@ public enum Apps {
     ///
     /// - Parameter inUse: whether an identifier belongs to something on this Mac. Called with the identifier and
     ///   each shorter prefix of three or more parts, so "com.vendor.app.helper" is kept while "com.vendor.app" exists.
-    public static func orphans(home: URL, fullDiskAccess: Bool, cancel: Cancellation, inUse: (String) -> Bool) -> [Orphan] {
+    /// - Parameter companyInUse: whether something on this Mac comes from the company prefix ("com.adobe"). Files of
+    ///   such a company that changed in the last month are left out: its other software is probably still using them.
+    public static func orphans(home: URL, fullDiskAccess: Bool, cancel: Cancellation, now: Date = Date(),
+                               companyInUse: (String) -> Bool = { _ in false }, inUse: (String) -> Bool) -> [Orphan] {
+        // Caches of command-line tools, such as SwiftPM's, are listed under package caches instead.
+        let tools = Set(Catalog.packageCaches.map { home.appendingPathComponent($0.1).path })
         var groups: [String: [Leftover]] = [:]
         var verdicts: [String: Bool] = [:]
         func owned(_ id: String) -> Bool {
@@ -169,7 +174,7 @@ public enum Apps {
         for place in places where (fullDiskAccess || !place.guarded) && place.folder != "Library/LaunchAgents" {
             let folder = home.appendingPathComponent(place.folder)
             for entry in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [] {
-                guard let id = identifier(in: entry), !owned(id) else { continue }
+                guard let id = identifier(in: entry), !owned(id), !tools.contains(folder.appendingPathComponent(entry).path) else { continue }
                 // ByHost settings carry the Mac's hardware UUID after the identifier.
                 var key = id
                 if place.folder.hasSuffix("ByHost"), let range = key.range(of: ".", options: .backwards) { key = String(key[..<range.lowerBound]) }
@@ -195,6 +200,10 @@ public enum Apps {
         return measured.map { id, leftovers in
             Orphan(bundleID: id, leftovers: leftovers.sorted { $0.usage.bytes > $1.usage.bytes },
                    newest: leftovers.compactMap { Catalog.modified($0.url) }.max())
+        }.filter { orphan in
+            let company = orphan.bundleID.split(separator: ".").prefix(2).joined(separator: ".")
+            let recent = orphan.newest.map { now.timeIntervalSince($0) < 30 * 86_400 } ?? false
+            return !(recent && companyInUse(company))
         }.sorted { $0.bytes > $1.bytes }
     }
 }

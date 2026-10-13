@@ -93,7 +93,7 @@ struct AppRow: View {
             Image(nsImage: AppLookup.icon(for: app.url, size: 30)).frame(width: 30, height: 30)
             VStack(alignment: .leading, spacing: 1) {
                 Text(app.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
-                Text(app.lastUsed.map { "Opened \($0.ago)" } ?? "Never opened")
+                Text(app.lastUsed.map { "Opened \($0.ago)" } ?? "No opening recorded")
                     .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 6)
@@ -127,7 +127,7 @@ struct AppDetail: View {
                 HStack(spacing: 28) {
                     fact("App", measured ? Bytes.text(app.size.bytes) : "…")
                     fact("Its files", measured ? Bytes.text(app.dataBytes) : "…")
-                    fact("Last opened", app.lastUsed?.ago ?? "Never")
+                    fact("Last opened", app.lastUsed?.ago ?? "Not recorded")
                 }
                 if app.isApple {
                     Label("Comes with macOS or from Apple. Spare leaves it alone.", systemImage: "apple.logo")

@@ -63,7 +63,9 @@ enum Page: String, CaseIterable, Identifiable {
 }
 
 struct ContentView: View {
-    @AppStorage("section") private var section = Page.cleanup
+    // Kept in plain state and saved on change: an @AppStorage selection could stop updating the detail column after
+    // the preference changed outside the app. `-section Apps` on the command line still picks the first page.
+    @State private var section = Page(rawValue: UserDefaults.standard.string(forKey: "section") ?? "") ?? .cleanup
     @ObservedObject private var shared = Shared.shared
     @ObservedObject private var cleanup = CleanupModel.shared
 
@@ -93,6 +95,7 @@ struct ContentView: View {
         .overlay(alignment: .bottom) {
             BannerView().animation(.snappy, value: shared.banner)
         }
+        .onChange(of: section) { _, value in UserDefaults.standard.set(value.rawValue, forKey: "section") }
     }
 
     private func badge(for item: Page) -> Text? {

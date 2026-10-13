@@ -119,6 +119,13 @@ write("home/Library/Preferences/com.apple.finder.plist", bytes: 500)
 let orphans = Apps.orphans(home: home, fullDiskAccess: false, cancel: Cancellation()) { $0 == "com.kept.app" }
 check(orphans.map(\.bundleID) == ["com.gone.app"], "lists leftovers only for identifiers nothing uses (\(orphans.map(\.bundleID)))")
 check(orphans.first?.leftovers.count == 3, "files a helper's leftovers with its app")
+write("home/Library/Caches/org.swift.swiftpm/manifests.bin", bytes: 500)
+write("home/Library/Preferences/com.vendor.removed.plist", bytes: 500)
+let quieter = Apps.orphans(home: home, fullDiskAccess: false, cancel: Cancellation(), companyInUse: { $0 == "com.vendor" }) { $0 == "com.kept.app" }
+check(quieter.map(\.bundleID) == ["com.gone.app"], "leaves out tool caches and fresh files of companies still installed (\(quieter.map(\.bundleID)))")
+let later = Apps.orphans(home: home, fullDiskAccess: false, cancel: Cancellation(), now: Date().addingTimeInterval(60 * 86_400),
+                         companyInUse: { $0 == "com.vendor" }) { $0 == "com.kept.app" }
+check(Set(later.map(\.bundleID)) == ["com.gone.app", "com.vendor.removed"], "lists a company's files once they've been untouched for a month")
 
 let contents = folder("Apps/Kept.app/Contents")
 try (["CFBundleIdentifier": "com.kept.app", "CFBundleName": "Kept", "CFBundleExecutable": "Kept", "CFBundlePackageType": "APPL"] as NSDictionary)
