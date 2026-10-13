@@ -218,8 +218,9 @@ struct LeftoversView: View {
                         Text("Files named after apps that are no longer on this Mac. Keep the ones for apps you'll reinstall, or that live on another drive.")
                             .font(.system(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Panel {
-                            ForEach(Array(model.orphans.enumerated()), id: \.element.id) { index, orphan in
-                                if index > 0 { Divider().padding(.leading, 40) }
+                            selectAllRow
+                            ForEach(model.orphans) { orphan in
+                                Divider().padding(.leading, 40)
                                 orphanRow(orphan)
                             }
                         }
@@ -251,6 +252,30 @@ struct LeftoversView: View {
         } message: {
             Text("\(Bytes.text(chosenBytes)). History can put them back until you empty the Trash.")
         }
+    }
+
+    private var allState: CheckState {
+        let chosen = model.orphans.filter { model.orphanSelection.contains($0.id) }.count
+        return chosen == 0 ? .off : chosen == model.orphans.count ? .on : .mixed
+    }
+
+    private var selectAllRow: some View {
+        HStack(spacing: 10) {
+            CheckBox(state: allState) { toggleAll() }
+            Text(allState == .on ? "All \(model.orphans.count) selected" : "Select all \(model.orphans.count)")
+                .font(.system(size: 12.5, weight: .medium))
+            Spacer()
+            SizeText(bytes: model.orphanBytes, weight: .regular).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onTapGesture { toggleAll() }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private func toggleAll() {
+        model.orphanSelection = allState == .on ? [] : Set(model.orphans.map(\.id))
     }
 
     private func orphanRow(_ orphan: Orphan) -> some View {
