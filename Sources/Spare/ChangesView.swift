@@ -108,7 +108,7 @@ struct ChangesView: View {
                 Text(explanation).font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 if kind == .privacy && mine.contains(where: \.ownerGone) {
-                    Toggle("Only apps that are gone", isOn: $onlyGone).toggleStyle(SketchCheckStyle()).fixedSize()
+                    Toggle("Only apps that are gone", isOn: $onlyGone).toggleStyle(SpareCheckStyle()).fixedSize()
                 }
                 if let settings = settingsURL {
                     Button("Open Settings…") { NSWorkspace.shared.open(settings) }.spareButton(.secondary).controlSize(.small)
@@ -119,7 +119,7 @@ struct ChangesView: View {
             if kind == .privacy && !shared.fullDiskAccess {
                 FullDiskAccessNote(compact: true).padding(.horizontal, 18).padding(.bottom, 12).arrives(1)
             }
-            TableCard(seed: "changes-\(kind.rawValue)") { table }.arrives(2, rise: 0)
+            TableCard { table }.arrives(2, rise: 0)
             ActionBar {
                 Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected" + (chosen.contains { !$0.removable } ? " · \(chosen.filter { !$0.removable }.count) changed only in Settings" : ""))
                     .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)

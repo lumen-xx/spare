@@ -141,18 +141,13 @@ enum Doodle: String, CaseIterable {
     }
 }
 
-/// One pencil stroke of a doodle, scaled from the 120 × 90 drawing box to the frame, with its own gentle unevenness.
+/// One stroke of a doodle, scaled from the 120 × 90 drawing box to the frame.
 private struct DoodleStroke: Shape {
     var stroke: Doodle.Stroke
-    var seed: UInt64
-    var wobble: CGFloat
 
     func path(in rect: CGRect) -> Path {
-        let noise = Wobble(seed, scale: 0.25)
         let (sx, sy) = (rect.width / Doodle.size.width, rect.height / Doodle.size.height)
-        let points = stroke.points.enumerated().map { index, point in
-            CGPoint(x: rect.minX + (point.x + wobble * noise.pick(index)) * sx, y: rect.minY + (point.y + wobble * noise.pick(index + 40)) * sy)
-        }
+        let points = stroke.points.map { CGPoint(x: rect.minX + $0.x * sx, y: rect.minY + $0.y * sy) }
         return Path.smooth(through: points, closed: stroke.closed)
     }
 }
@@ -165,13 +160,12 @@ struct DoodleView: View {
     @Environment(\.reduceMotion) private var reduceMotion
 
     var body: some View {
-        let seed = Jitter.seed(doodle.rawValue)
         let strokes = doodle.strokes
         ZStack {
             ForEach(strokes.indices, id: \.self) { index in
                 let stroke = strokes[index]
                 let delay = 0.1 + Double(index) * 0.11 * (1 + 0.1 * Jitter.unit(index))
-                DoodleStroke(stroke: stroke, seed: seed &+ UInt64(index), wobble: 0.5)
+                DoodleStroke(stroke: stroke)
                     .trim(from: 0, to: drawn || reduceMotion ? 1 : 0)
                     .stroke(Ink.pencil, style: StrokeStyle(lineWidth: 1.5 * stroke.weight * width / 120, lineCap: .round, lineJoin: .round))
                     .animation(reduceMotion ? nil : Motion.draw.delay(delay), value: drawn)

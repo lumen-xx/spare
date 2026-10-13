@@ -197,7 +197,7 @@ struct DockerView: View {
                             text: "Start Docker Desktop, OrbStack or Colima to see what's inside its disk. Docker said: “\(problem)”",
                             actionTitle: "Try Again") { model.load() }
             } else {
-                Card(seed: 0xD0C) {
+                Card {
                     if model.usage.isEmpty {
                         HStack(spacing: 8) {
                             if model.loading { ThinkingDots() }
@@ -206,7 +206,7 @@ struct DockerView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     }
                     ForEach(Array(model.usage.enumerated()), id: \.element.id) { index, usage in
-                        if index > 0 { SketchDivider(seed: Jitter.seed(usage.kind)).padding(.leading, 56).padding(.trailing, 14) }
+                        if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                         UsageRow(usage: usage) { clearing in confirming = (clearing, usage) }
                     }
                 }
@@ -217,9 +217,9 @@ struct DockerView: View {
     private var disksSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Disk Files", subtitle: "Space they really take, which can be less than Finder shows")
-            Card(seed: 0xD15C5) {
+            Card {
                 ForEach(Array(model.disks.enumerated()), id: \.element.id) { index, disk in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(disk.id)).padding(.leading, 44).padding(.trailing, 12) }
+                    if index > 0 { RowDivider().padding(.leading, 44).padding(.trailing, 12) }
                     HStack(spacing: 10) {
                         Image(systemName: "externaldrive").font(.system(size: 14)).foregroundStyle(.secondary).frame(width: 20).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 1) {

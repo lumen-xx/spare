@@ -122,9 +122,9 @@ struct BrowserExtensionsView: View {
                         .help(manageHint(browser))
                 }
             }
-            Card(seed: Jitter.seed(browser.rawValue + (profile ?? ""))) {
+            Card {
                 ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(item.id)).padding(.leading, 56).padding(.trailing, 14) }
+                    if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                     AddOnRow(item: item)
                 }
             }
@@ -165,7 +165,7 @@ private struct AddOnRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .contentShape(Rectangle())
-        .hoverWash(radius: 9, seed: Jitter.seed(item.id))
+        .hoverWash(radius: 9)
         .hoverLag($hovering)
         .padding(.horizontal, 3).padding(.vertical, 1)
         .contextMenu {

@@ -15,7 +15,7 @@ struct SpaceView: View {
                 EmptyState(doodle: .folder, title: "Nothing in this folder", text: "Or Spare isn't allowed to look inside it.")
                     .arrives(1)
             } else {
-                TableCard(seed: "space") {
+                TableCard {
                     List(selection: $selection) {
                         ForEach(model.entries) { entry in
                             SpaceRow(entry: entry, largest: model.largest)
@@ -135,7 +135,7 @@ struct SpaceRow: View {
                     .accessibilityLabel("Partly unreadable")
             }
             Spacer(minLength: 12)
-            UsageBar(fraction: largest > 0 ? Double(entry.bytes ?? 0) / Double(largest) : 0, seed: Jitter.seed(entry.id))
+            UsageBar(fraction: largest > 0 ? Double(entry.bytes ?? 0) / Double(largest) : 0)
                 .frame(width: 160)
             Group {
                 if entry.bytes == nil && !entry.locked { ThinkingDots() }

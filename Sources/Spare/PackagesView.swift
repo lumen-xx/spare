@@ -217,7 +217,7 @@ struct PackagesView: View {
         VStack(spacing: 0) {
             filters.arrives(0)
             if part == .managers && !model.unused.isEmpty { unusedNote.arrives(1) }
-            TableCard(seed: "packages-\(part)") { table }.arrives(2, rise: 0)
+            TableCard { table }.arrives(2, rise: 0)
             ActionBar {
                 Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected · \(Bytes.text(chosen.compactMap(\.bytes).reduce(0, +)))")
                     .font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
@@ -256,7 +256,7 @@ struct PackagesView: View {
                 }
                 .fixedSize()
                 Toggle("Only what you installed", isOn: $onlyRequested)
-                    .toggleStyle(SketchCheckStyle())
+                    .toggleStyle(SpareCheckStyle())
                     .help("Hide packages that were installed only because another package needs them")
             } else {
                 Text(part == .toolchains

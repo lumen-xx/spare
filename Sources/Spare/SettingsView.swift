@@ -82,11 +82,11 @@ struct SettingsView: View {
                 divider("sound")
                 Toggle(isOn: $sound) { label("Quiet sound", "A soft pop when something finishes.") }.row()
             }
-            .toggleStyle(SketchSwitchStyle())
+            .toggleStyle(SpareSwitchStyle())
             .arrives(2)
 
             group("Updates") {
-                Toggle(isOn: $updates.automatic) { Text("Check for updates automatically") }.toggleStyle(SketchSwitchStyle()).row()
+                Toggle(isOn: $updates.automatic) { Text("Check for updates automatically") }.toggleStyle(SpareSwitchStyle()).row()
                 divider("check")
                 HStack {
                     Button("Check Now") { updates.check() }.spareButton(.secondary).controlSize(.small)
@@ -121,7 +121,7 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.spare(size: 13, weight: .semibold)).padding(.horizontal, 6)
                 .accessibilityAddTraits(.isHeader)
-            Card(seed: Jitter.seed(title), radius: 12) { content() }
+            Card(radius: 12) { content() }
             if let footer {
                 Text(footer).font(.spare(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 6)
                     .fixedSize(horizontal: false, vertical: true)
@@ -144,7 +144,7 @@ struct SettingsView: View {
     }
 
     private func divider(_ key: String) -> some View {
-        SketchDivider(seed: Jitter.seed(key)).padding(.horizontal, 12)
+        RowDivider().padding(.horizontal, 12)
     }
 
     private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development" }

@@ -86,9 +86,9 @@ struct CleanupView: View {
             SectionHeading(title: group.rawValue, subtitle: group == .review ? "Never selected for you" : nil) {
                 SizeText(bytes: model.bytes(in: group), weight: .regular).foregroundStyle(.secondary)
             }
-            Card(seed: Jitter.seed(group.rawValue)) {
+            Card {
                 ForEach(Array(rules.enumerated()), id: \.element.id) { index, rule in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(rule.id)).padding(.leading, 62).padding(.trailing, 14) }
+                    if index > 0 { RowDivider().padding(.leading, 62).padding(.trailing, 14) }
                     FindingRow(rule: rule)
                 }
             }
@@ -120,7 +120,7 @@ struct FindingRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                CheckBox(state: model.state(finding), seed: rule.id) { if let finding { model.toggle(finding) } }
+                CheckBox(state: model.state(finding)) { if let finding { model.toggle(finding) } }
                     .disabled(empty || locked || pending)
                     .opacity(empty || locked ? 0.35 : 1)
                     .accessibilityLabel(rule.title)
@@ -141,7 +141,7 @@ struct FindingRow: View {
             }
             .padding(.horizontal, 11).padding(.vertical, empty || locked ? 8 : 11)
             .contentShape(Rectangle())
-            .hoverWash(radius: 10, seed: Jitter.seed(rule.id))
+            .hoverWash(radius: 10)
             .onTapGesture { if !empty && !locked && !pending { toggleExpanded() } }
             .padding(.horizontal, 3).padding(.vertical, 2)
 
@@ -209,7 +209,7 @@ struct ItemRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CheckBox(state: model.selected.contains(item.id) && item.inUseBy == nil ? .on : .off, seed: item.id) { model.toggle(item) }
+            CheckBox(state: model.selected.contains(item.id) && item.inUseBy == nil ? .on : .off) { model.toggle(item) }
                 .disabled(item.inUseBy != nil).opacity(item.inUseBy == nil ? 1 : 0.35)
                 .accessibilityLabel(item.label)
             VStack(alignment: .leading, spacing: 1) {
@@ -241,7 +241,7 @@ struct ItemRow: View {
         }
         .padding(.vertical, 4).padding(.horizontal, 6)
         .contentShape(Rectangle())
-        .hoverWash(radius: 7, seed: Jitter.seed(item.id))
+        .hoverWash(radius: 7)
         .hoverLag($hovering)
         .onTapGesture { model.toggle(item) }
         .padding(.horizontal, -6)

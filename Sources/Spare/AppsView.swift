@@ -47,7 +47,7 @@ struct AppsView: View {
                 }
                 .padding(.horizontal, 18).padding(.top, 14)
                 .arrives(0)
-                TableCard(seed: "apps") {
+                TableCard {
                     List(selection: $model.selection) {
                         ForEach(visible) { app in AppRow(app: app, measured: model.measured.contains(app.id)).tag(app.id) }
                     }
@@ -130,10 +130,10 @@ struct AppDetail: View {
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     SectionHeading(title: "Goes to the Trash")
-                    Card(seed: Jitter.seed(app.bundleID)) {
+                    Card {
                         row(url: app.url, kind: "The app", bytes: app.size.bytes, state: .on, toggle: nil)
                         ForEach(app.leftovers) { leftover in
-                            SketchDivider(seed: Jitter.seed(leftover.id)).padding(.leading, 42).padding(.trailing, 12)
+                            RowDivider().padding(.leading, 42).padding(.trailing, 12)
                             row(url: leftover.url, kind: leftover.kind, bytes: leftover.usage.bytes,
                                 state: model.kept.contains(leftover.id) ? .off : .on) {
                                 if model.kept.contains(leftover.id) { model.kept.remove(leftover.id) } else { model.kept.insert(leftover.id) }
@@ -183,7 +183,7 @@ struct AppDetail: View {
 
     private func row(url: URL, kind: String, bytes: Int64, state: CheckState, toggle: (() -> Void)?) -> some View {
         HStack(spacing: 10) {
-            CheckBox(state: state, seed: url.path) { toggle?() }
+            CheckBox(state: state) { toggle?() }
                 .disabled(toggle == nil).opacity(toggle == nil ? 0.5 : 1)
                 .accessibilityLabel(kind)
             VStack(alignment: .leading, spacing: 1) {
@@ -222,10 +222,10 @@ struct LeftoversView: View {
                     Text("Files named after apps that are no longer on this Mac. Keep the ones for apps you'll reinstall, or that live on another drive.")
                         .font(.spare(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         .arrives(0)
-                    Card(seed: 0x1EF7) {
+                    Card {
                         selectAllRow
                         ForEach(model.orphans.filter { !$0.forAllUsers }) { orphan in
-                            SketchDivider(seed: Jitter.seed(orphan.id)).padding(.leading, 42).padding(.trailing, 12)
+                            RowDivider().padding(.leading, 42).padding(.trailing, 12)
                             orphanRow(orphan)
                         }
                     }
@@ -236,9 +236,9 @@ struct LeftoversView: View {
                                        subtitle: "In /Library, named after software that isn't on this Mac any more. Removing these asks for an administrator password once.")
                             .padding(.top, 10)
                             .arrives(2)
-                        Card(seed: 0xE7E4) {
+                        Card {
                             ForEach(Array(everyone.enumerated()), id: \.element.id) { index, orphan in
-                                if index > 0 { SketchDivider(seed: Jitter.seed(orphan.id)).padding(.leading, 42).padding(.trailing, 12) }
+                                if index > 0 { RowDivider().padding(.leading, 42).padding(.trailing, 12) }
                                 orphanRow(orphan)
                             }
                         }
@@ -283,7 +283,7 @@ struct LeftoversView: View {
 
     private var selectAllRow: some View {
         HStack(spacing: 10) {
-            CheckBox(state: allState, seed: "all") { toggleAll() }
+            CheckBox(state: allState) { toggleAll() }
                 .accessibilityLabel("Select all")
             Text(allState == .on ? "All \(model.orphans.count) selected" : "Select all \(model.orphans.count)")
                 .font(.spare(size: 12.5, weight: .medium))
@@ -302,7 +302,7 @@ struct LeftoversView: View {
     private func orphanRow(_ orphan: Orphan) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                CheckBox(state: model.orphanSelection.contains(orphan.id) ? .on : .off, seed: orphan.id) {
+                CheckBox(state: model.orphanSelection.contains(orphan.id) ? .on : .off) {
                     if model.orphanSelection.contains(orphan.id) { model.orphanSelection.remove(orphan.id) } else { model.orphanSelection.insert(orphan.id) }
                 }
                 .accessibilityLabel(orphan.bundleID)

@@ -152,9 +152,9 @@ struct CloudView: View {
                 }
             }
             if !provider.places.isEmpty {
-                Card(seed: Jitter.seed(provider.id)) {
+                Card {
                     ForEach(Array(provider.places.prefix(12).enumerated()), id: \.element.id) { index, place in
-                        if index > 0 { SketchDivider(seed: Jitter.seed(place.id)).padding(.leading, 44).padding(.trailing, 12) }
+                        if index > 0 { RowDivider().padding(.leading, 44).padding(.trailing, 12) }
                         PlaceRow(place: place, provider: provider.name, largest: provider.places.first?.bytes ?? 1) {
                             confirming = Target(id: place.id, name: place.name, provider: provider.name, url: place.url, bytes: place.bytes)
                         }
@@ -186,7 +186,7 @@ private struct PlaceRow: View {
                 Text(place.files == 1 ? "1 file" : "\(place.files.formatted()) files").font(.spare(size: 11)).foregroundStyle(.secondary)
             }
             Spacer(minLength: 12)
-            UsageBar(fraction: Double(place.bytes) / Double(max(largest, 1)), seed: Jitter.seed(place.id)).frame(width: 110)
+            UsageBar(fraction: Double(place.bytes) / Double(max(largest, 1))).frame(width: 110)
             SizeText(bytes: place.bytes).frame(width: 70, alignment: .trailing)
             if model.removing == place.id {
                 ThinkingDots().frame(width: 64)
@@ -201,7 +201,7 @@ private struct PlaceRow: View {
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .contentShape(Rectangle())
-        .hoverWash(radius: 8, seed: Jitter.seed(place.id))
+        .hoverWash(radius: 8)
         .hoverLag($hovering)
         .padding(.horizontal, 3).padding(.vertical, 1)
         .contextMenu {

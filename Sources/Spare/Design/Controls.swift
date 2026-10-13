@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Spare's buttons: flat and quiet, with corners that differ by a hair. Each squashes a little under the pointer and
+/// Spare's buttons: flat and quiet, with evenly rounded corners. Each squashes a little under the pointer and
 /// springs back with a small overshoot, notices the pointer with a soft lag, and shows keyboard focus with its own ring.
 struct SpareButtonStyle: ButtonStyle {
     enum Kind {
@@ -48,10 +48,9 @@ private struct StyledButton: View {
 
     private var pressed: Bool { configuration.isPressed }
     private var destructive: Bool { configuration.role == .destructive }
-    private var seed: UInt64 { kind == .primary ? 0xA11CE : kind == .secondary ? 0xB0B : 0xC0FFEE }
 
     var body: some View {
-        let shape = SketchRect(radius: radius, seed: seed, wobble: 0.3, corners: 0.15, bySize: true)
+        let shape = RoundedRectangle.continuous(radius)
         configuration.label
             .font(font)
             .lineLimit(1)
@@ -69,13 +68,13 @@ private struct StyledButton: View {
                     shape.fill(Ink.press)
                         .overlay(shape.fill(pressed ? Ink.press : hovering ? Ink.wash : .clear))
                         .overlay {
-                            if contrast == .increased { SketchBorder(shape: shape, width: 1.2).fill(Ink.edge) }
+                            if contrast == .increased { shape.strokeBorder(Ink.edge, lineWidth: 1.2) }
                         }
                 case .quiet, .icon:
                     shape.fill(pressed ? Ink.press : hovering ? Ink.wash : .clear)
                 }
             }
-            .overlay { SketchFocusRing(focused: focused, radius: radius, seed: seed) }
+            .overlay { FocusRing(focused: focused, radius: radius) }
             .contentShape(shape)
             .scaleEffect(x: pressed && !reduceMotion ? 1.015 : 1, y: pressed && !reduceMotion ? 0.95 : 1)
             .animation(pressed ? Motion.press : Motion.release, value: pressed)
@@ -132,17 +131,10 @@ private struct StyledButton: View {
 /// itself in with a small bounce. The state itself changes at once; only the drawing waits.
 struct CheckBox: View {
     let state: CheckState
-    var seed: String = ""
     let action: () -> Void
 
-    init(state: CheckState, seed: String = "", action: @escaping () -> Void) {
-        self.state = state
-        self.seed = seed
-        self.action = action
-    }
-
     var body: some View {
-        Button(action: action) { CheckFace(state: state, seed: Jitter.seed("check" + seed)) }
+        Button(action: action) { CheckFace(state: state) }
             .buttonStyle(CheckStyle())
             .focusEffectDisabled()
             .accessibilityValue(state == .on ? "checked" : state == .mixed ? "partly checked" : "unchecked")
@@ -159,7 +151,7 @@ private struct CheckStyle: ButtonStyle {
         @Environment(\.reduceMotion) private var reduceMotion
         var body: some View {
             configuration.label
-                .overlay { SketchFocusRing(focused: focused, radius: 5, seed: 0xC4EC) }
+                .overlay { FocusRing(focused: focused, radius: 5) }
                 .scaleEffect(x: configuration.isPressed && !reduceMotion ? 1.06 : 1, y: configuration.isPressed && !reduceMotion ? 0.9 : 1)
                 .animation(configuration.isPressed ? Motion.press : Motion.release, value: configuration.isPressed)
                 .frame(width: 20, height: 20)
@@ -170,19 +162,17 @@ private struct CheckStyle: ButtonStyle {
 
 private struct CheckFace: View {
     let state: CheckState
-    let seed: UInt64
     @Environment(\.isEnabled) private var enabled
     @Environment(\.reduceMotion) private var reduceMotion
     @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
-        let shape = SketchRect(radius: 4.5, seed: seed, wobble: 0.3, corners: 0.2)
+        let shape = RoundedRectangle.continuous(4.5)
         let filled = state != .off
         ZStack {
             shape.fill(filled ? AnyShapeStyle(.tint) : AnyShapeStyle(Ink.card))
-            SketchBorder(shape: shape, width: contrast == .increased ? 1.6 : 1.2)
-                .fill(filled ? AnyShapeStyle(.tint) : AnyShapeStyle(Ink.edge))
-            CheckMark(seed: seed)
+            shape.strokeBorder(filled ? AnyShapeStyle(.tint) : AnyShapeStyle(Ink.edge), lineWidth: contrast == .increased ? 1.6 : 1.2)
+            CheckMark()
                 .trim(from: 0, to: state == .on ? 1 : 0)
                 .stroke(.white, style: StrokeStyle(lineWidth: 1.9, lineCap: .round, lineJoin: .round))
                 .padding(1.5)
@@ -210,8 +200,8 @@ private struct CheckFace: View {
 
 // MARK: - Switch
 
-/// A hand-drawn switch for Settings. The knob waits a beat, slides with a little overshoot, and stretches while pressed.
-struct SketchSwitchStyle: ToggleStyle {
+/// A switch for Settings. The knob waits a beat, slides with a little overshoot, and stretches while pressed.
+struct SpareSwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(alignment: .center, spacing: 12) {
             configuration.label
@@ -248,10 +238,10 @@ private struct SwitchFace: View {
     @Environment(\.reduceMotion) private var reduceMotion
 
     var body: some View {
-        let track = SketchRect(radius: 10, seed: 0x5717C, wobble: 0.4, corners: 0.1)
+        let track = Capsule()
         ZStack(alignment: on ? .trailing : .leading) {
             track.fill(on ? AnyShapeStyle(.tint) : AnyShapeStyle(Ink.press))
-                .overlay(SketchBorder(shape: track, width: 1).fill(on ? AnyShapeStyle(.clear) : AnyShapeStyle(Ink.line)))
+                .overlay(track.strokeBorder(on ? AnyShapeStyle(.clear) : AnyShapeStyle(Ink.line), lineWidth: 1))
             Circle()
                 .fill(.white)
                 .frame(width: pressed && !reduceMotion ? 20 : 16, height: 16)
@@ -259,7 +249,7 @@ private struct SwitchFace: View {
                 .padding(2)
         }
         .frame(width: 36, height: 20)
-        .overlay { SketchFocusRing(focused: focused, radius: 10, seed: 0x5717C) }
+        .overlay { FocusRing(focused: focused, radius: 10) }
         .animation(reduceMotion ? Motion.calm : Motion.varied(Motion.settle, on ? 1 : 2).delay(Beat.toggle), value: on)
         .animation(Motion.press, value: pressed)
         .opacity(enabled ? 1 : 0.45)
@@ -269,7 +259,7 @@ private struct SwitchFace: View {
 
 // MARK: - Small parts
 
-/// A small hand-drawn label, such as "Rebuilds itself".
+/// A small label, such as "Rebuilds itself".
 struct Tag: View {
     let text: String
     let tint: Color
@@ -283,41 +273,39 @@ struct Tag: View {
         .font(.spare(size: 10.5, weight: .semibold))
         .foregroundStyle(tint)
         .padding(.horizontal, 7).padding(.vertical, 2)
-        .background(SketchRect(radius: 8, seed: Jitter.seed(text), wobble: 0.25, corners: 0.2).fill(tint.opacity(0.12)))
+        .background(Capsule().fill(tint.opacity(0.12)))
     }
 }
 
-/// A symbol on a small tile of its colour, with corners that differ by a hair.
+/// A symbol on a small tile of its colour.
 struct SymbolTile: View {
     let symbol: String
     let tint: Color
     var size: CGFloat = 30
 
     var body: some View {
-        let seed = Jitter.seed(symbol)
         Image(systemName: symbol)
             .font(.system(size: size * 0.47, weight: .medium))
             .foregroundStyle(tint)
             .frame(width: size, height: size)
-            .background(SketchRect(radius: size * 0.3, seed: seed, wobble: 0.3, corners: 0.15).fill(tint.opacity(0.12)))
+            .background(RoundedRectangle.continuous(size * 0.3).fill(tint.opacity(0.12)))
             .accessibilityHidden(true)
     }
 }
 
-/// How full something is, as a hand-drawn bar.
+/// How full something is, as a bar.
 struct UsageBar: View {
     var fraction: Double
     /// The accent colour unless given.
     var tint: Color?
-    var seed: UInt64 = 1
     var height: CGFloat = 6
 
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width * min(1, max(0, fraction))
             ZStack(alignment: .leading) {
-                SketchRect(radius: height / 2, seed: seed, wobble: 0.35, corners: 0.1).fill(Ink.press)
-                SketchRect(radius: height / 2, seed: seed &+ 1, wobble: 0.35, corners: 0.1)
+                Capsule().fill(Ink.press)
+                Capsule()
                     .fill(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint))
                     .frame(width: fraction > 0 ? max(height, width) : 0)
             }
@@ -357,10 +345,10 @@ struct ThinkingDots: View {
 // MARK: - Check box toggle
 
 /// A Toggle drawn as Spare's check box, for options such as "Only what you installed".
-struct SketchCheckStyle: ToggleStyle {
+struct SpareCheckStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         HStack(spacing: 7) {
-            CheckBox(state: configuration.isOn ? .on : .off, seed: "toggle") { configuration.isOn.toggle() }
+            CheckBox(state: configuration.isOn ? .on : .off) { configuration.isOn.toggle() }
             configuration.label
                 .onTapGesture { configuration.isOn.toggle() }
         }

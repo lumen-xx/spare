@@ -294,7 +294,7 @@ struct StartupView: View {
             }
             .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
             .arrives(0)
-            TableCard(seed: "startup-\(part)") { table }.arrives(1, rise: 0)
+            TableCard { table }.arrives(1, rise: 0)
             actionBar.arrives(2)
         }
         .arrivalStage(replay: model.rows.isEmpty)

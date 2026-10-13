@@ -90,12 +90,12 @@ struct HomeView: View {
                     .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 if place == .home && mine.contains(where: \.ownerGone) {
-                    Toggle("Only what's left behind", isOn: $onlyGone).toggleStyle(SketchCheckStyle()).fixedSize()
+                    Toggle("Only what's left behind", isOn: $onlyGone).toggleStyle(SpareCheckStyle()).fixedSize()
                 }
             }
             .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
             .arrives(0)
-            TableCard(seed: "home-\(place.rawValue)") { table }.arrives(1)
+            TableCard { table }.arrives(1)
             ActionBar {
                 Text(chosen.isEmpty ? countText(visible.count, "item") : "\(chosen.count) selected · \(Bytes.text(chosen.compactMap(\.bytes).reduce(0, +)))")
                     .font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)

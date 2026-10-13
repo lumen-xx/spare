@@ -1,10 +1,10 @@
 # How Spare looks, moves and feels
 
 **A tidy desk, not a scrapbook.** Spare is a clean, quiet Mac app. Its warmth lives in how things move and how it
-answers you, plus hand-made irregularities so small you feel them before you see them.
+answers you. The shapes themselves are even and precise.
 
 The code is in [`Sources/Spare/Design`](../Sources/Spare/Design): colours in `Ink.swift`, the typeface in
-`Typeface.swift`, motion in `Motion.swift`, hand-drawn geometry in `Sketch.swift`, paper and shadows in `Paper.swift`,
+`Typeface.swift`, motion in `Motion.swift`, shapes in `Shapes.swift`, paper and shadows in `Paper.swift`,
 controls in `Controls.swift`, drawings in
 `Doodles.swift` and acknowledgements in `Feedback.swift`. Shared page parts (banners, empty states, headings) are in
 `Components.swift`.
@@ -18,8 +18,8 @@ between, more like a well-made notebook than a dashboard.
 So the layout is plain macOS, and the personality comes from three places:
 
 1. **Motion.** Springs with a little weight and overshoot. Neighbours never move in lockstep.
-2. **Line.** Edges and dividers are drawn rather than ruled: corners that differ by a hair, hairlines that taper at
-   the ends. At normal viewing distance this reads as soft, not wobbly.
+2. **Material.** Warm, frosted paper with the desktop showing through, and cards with even, continuous corners and
+   a hairline edge.
 3. **Acknowledgement.** A beat before a tick lands, a mark drawn when something finishes, a soft tap on the
    trackpad, and the same words for VoiceOver.
 
@@ -30,8 +30,7 @@ So the layout is plain macOS, and the personality comes from three places:
 - **Light shadows only.** They fall down and to the right at 4–6 % in light mode. Never a halo, never a glow.
 - **Nothing ornamental.** No gradients, bevels, embossing, stitching or ribbons. One typeface, Bricolage Grotesque,
   in a few weights.
-- **Wobble under a point.** Card edges stray at most 0.35 pt and buttons 0.3 pt. If you can spot it at a glance, it's
-  too much.
+- **Even shapes.** Every corner of a shape has the same continuous radius, and every line is straight and even.
 - **Drawings stay in empty states.** They're single pencil-grey lines, used only where there's nothing else to show,
   never as decoration on a working screen.
 - **One accent colour.** Amber means "worth a look", never "danger". The red-brown is only for destructive labels.
@@ -52,7 +51,7 @@ sits inside the content area.
 | --- | --- |
 | ![Cleanup in light mode](images/design/main-light.png) | ![Cleanup in dark mode](images/design/main-dark.png) |
 
-The page sits on warm, frosted paper. Each group is a card with hand-drawn hairlines between rows. One large number says what
+The page sits on warm, frosted paper. Each group is a card with hairlines between rows. One large number says what
 the page is about, and the one primary button sits beside it with its shortcut (⌘⌫). Rules still measuring show
 bobbing dots and then settle into their result one by one, each at its own pace. The sidebar is the system's, with the
 disk card at the bottom.
@@ -83,7 +82,7 @@ lock and folder), each in a 120 × 90 box with at most two mint sparkles.
 | --- | --- |
 | ![The Trash wasn't emptied, light](images/design/error-light.png) | ![The Trash wasn't emptied, dark](images/design/error-dark.png) |
 
-When something fails, a message is held a little above the page. It has a hand-drawn amber "!", what happened, why
+When something fails, a message is held a little above the page. It has an amber "!", what happened, why
 (if known) and the next step as its only filled button: **Try Again**, or **Open Settings…** when a permission is
 missing. Problems stay until dismissed. Successes fold away after two seconds, unless the pointer is on them. When a
 whole page can't load, it shows a `ProblemNote` instead: the knot drawing, what happened and one button.
@@ -198,12 +197,11 @@ no fibres or stains, and nothing you'd notice in a screenshot.
 
 ### See-through paper
 
-The paper is frosted glass. Behind it, macOS blurs whatever is under the window, as it does for its own sidebars
-(`NSVisualEffectView`, `.underWindowBackground`, blended behind the window), and the paper lies over that at 45 %
-in light mode and 55 % in dark mode: enough to keep its warmth and the text's contrast, little enough to see the
-desktop's colours through it. Cards stay solid. When the window goes to the background, the paper fades to solid in
-0.2 s, as sidebars turn solid. With Reduce Transparency or Increase Contrast it's always solid. The blur is drawn by
-the window server, so it costs Spare nothing per frame.
+The paper is frosted glass. Behind it, macOS blurs whatever is under the window with its sidebar material
+(`NSVisualEffectView`, `.sidebar`, blended behind the window), and the paper lies over that at 30 % in light mode and
+35 % in dark mode: enough to keep its warmth, little enough to see the desktop's colours through it. It stays frosted
+while the window is in the background. Cards stay solid. With Reduce Transparency or Increase Contrast it's solid
+paper. The blur is drawn by the window server, so it costs Spare nothing per frame.
 
 ### Surfaces
 
@@ -217,29 +215,25 @@ falls down and to the right. It's never a centred halo.
 
 | | Value |
 | --- | --- |
-| Shadow body | The card's own shape, inset 5 × lift at the top and 3 × lift at the leading edge, extended 1.2 × lift to the right and 2.6 × lift at the bottom. Each side varies ±15 % by seed, so no two cards cast the same shadow. |
+| Shadow body | The card's own shape, inset 5 × lift at the top and 3 × lift at the leading edge, extended 1.2 × lift to the right and 2.6 × lift at the bottom. |
 | Offset and blur | (0.8, 1.6) × lift, blur 5 × lift |
 | Opacity | 4 % + 1.5 % × lift in light mode, 26 % + 3 % × lift in dark mode |
 | Contact line | The same shape offset (0.2, 0.6), blur 0.6, at 4.5 % light or 30 % dark: the faint line where card meets paper |
 | Colour | Brown-black (`shade`) in light mode, like shade on paper; black in dark mode |
 
-### Line quality
+### Shapes
 
-Hand-drawn shapes are seeded, so the same thing is always drawn the same way: nothing shimmers between frames or
-launches, and resizing a card doesn't reshuffle its bumps. The unevenness is three sine waves along the edge
-(wavelengths about 90, 32 and 12 pt, scaled down for small shapes), and a second set makes lines swell and thin.
+Surfaces are `RoundedRectangle.continuous(_:)`, the same squircle corners macOS uses.
 
-| Part | Corner radius | Corners differ by | Edge strays | Line |
-| --- | --- | --- | --- | --- |
-| Card | 12–14 pt | 10 % | 0.35 pt | 0.75 pt hairline, ±30 % (1.25 pt with Increase Contrast) |
-| Message | 16 pt | 10 % | 0.35 pt | 0.75 pt hairline |
-| Button | 7–10 pt | 15 % | 0.3 pt | none (1.2 pt edge with Increase Contrast) |
-| Check box | 4.5 pt | 20 % | 0.3 pt | 1.2 pt (1.6 pt with Increase Contrast) |
-| Switch track | 10 pt | 10 % | 0.4 pt | 1 pt when off |
-| Tag, symbol tile | 8 pt / 30 % of size | 15–20 % | 0.25–0.3 pt | fill only, accent at 12 % |
-| Divider | | | 0.3 pt | 0.8 pt, tapering to 35 % over the last 10 pt at each end |
-| Focus ring | control + 3 pt | | 0.4 pt | 1.8 pt in the accent at 70 %, ±25 % |
-| Drawings | | | | 1.5 pt pencil at 120 pt wide, up to 2.2× for a handle, round caps, one stroke per line |
+| Part | Corner radius | Line |
+| --- | --- | --- |
+| Card | 12–14 pt | 0.75 pt hairline (1.25 pt with Increase Contrast) |
+| Message, tray | 14–16 pt | 0.75 pt hairline |
+| Button | 7–10 pt | none (1.2 pt edge with Increase Contrast) |
+| Check box | 4.5 pt | 1.2 pt (1.6 pt with Increase Contrast) |
+| Switch track, tag, usage bar | capsule | 1 pt on the switch when off; tags and bars are fill only |
+| Symbol tile | 30 % of its size | fill only, accent at 12 % |
+| Divider | | 1 pt |
 
 ## Building with it in SwiftUI
 
@@ -255,11 +249,11 @@ struct ExampleView: View {
                 SizeText(bytes: total)                 // rolls to new values
             }
             .arrives(0)
-            Card {                                     // seeded from its place in the code unless given a seed
+            Card {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(row.id)).padding(.horizontal, 12) }
+                    if index > 0 { RowDivider().padding(.horizontal, 12) }
                     RowView(row: row)
-                        .hoverWash(seed: Jitter.seed(row.id))
+                        .hoverWash()
                 }
             }
             .arrives(1)
@@ -278,15 +272,15 @@ struct ExampleView: View {
 | --- | --- |
 | `PageScroll(maxWidth:spacing:replay:)` | Scrolling page column, centred, without scroll bars, and an arrival stage |
 | `.arrivalStage(replay:)` / `.arrives(_:rise:)` | Parts of a page arriving in order, again when `replay` turns false. Tables use `rise: 0`, so they only fade. |
-| `Card(seed:radius:lift:fill:)` | Hand-drawn card with hairline and desk shadow |
-| `TableCard(seed:)` | A native `List` on a card, with no stripes or scroll bars |
-| `SketchDivider(seed:)` | Hairline between rows |
+| `Card(radius:lift:fill:)` | Card with hairline and desk shadow |
+| `TableCard` | A native `List` on a card, with no stripes or scroll bars |
+| `RowDivider()` | Hairline between rows |
 | `.spareButton(.primary / .secondary / .quiet / .icon)` | Buttons with squash, hover lag and focus ring. `role: .destructive` turns the label red-brown. |
-| `CheckBox(state:seed:action:)`, `SketchCheckStyle()` | Check box with a mixed state, and the same as a `Toggle` style |
-| `SketchSwitchStyle()` | Switch for settings |
+| `CheckBox(state:action:)`, `SpareCheckStyle()` | Check box with a mixed state, and the same as a `Toggle` style |
+| `SpareSwitchStyle()` | Switch for settings |
 | `Tag`, `SafetyPill`, `SymbolTile`, `UsageBar`, `SizeText` | Small parts |
 | `ThinkingDots()` | Shown while working. They repeat only while on screen. |
-| `.hoverWash(radius:seed:)`, `.hoverLag(_:)` | Noticing the pointer, with the soft lag |
+| `.hoverWash(radius:)`, `.hoverLag(_:)` | Noticing the pointer, with the soft lag |
 | `EmptyState(doodle:title:text:actions:)` | A page with nothing to show |
 | `ProblemNote(title:text:actionTitle:action:)` | A page that couldn't load |
 | `Shared.banner = .init(title:detail:…, next: .init(title:) { … })` | A message with its next step |
@@ -299,8 +293,6 @@ struct ExampleView: View {
 
 ### Rules of thumb
 
-- **Seed from identity.** Use `Jitter.seed(id)` with a stable identifier, never an index or a random number, so a
-  shape never changes between frames.
 - **Delay the drawing, not the state.** Put the beat on the animation, `.animation(Motion.settle.delay(Beat.tick),
   value:)`, and never on the model with `asyncAfter`.
 - **Check Reduce Motion** for every scale, offset or bounce, or use `Motion.gentle(_:reduceMotion:)`. Read it as
@@ -349,7 +341,7 @@ and every warning with a symbol and a sentence.
 
 ### Keyboard
 
-- Spare's own controls draw a hand-drawn focus ring in the accent colour, in place of the system's rectangle. Native
+- Spare's own controls draw a focus ring in the accent colour, in place of the system's rectangle. Native
   controls keep the system's ring. Turn on Keyboard navigation in System Settings to move focus to every control.
 - Shortcuts: ⌘⌫ moves what's selected to the Trash (after asking), ⌘R scans again, ⇧⌘⌫ empties the Trash (after
   asking), ⌘, opens Settings, and Return opens a folder on the Space page.
@@ -360,5 +352,5 @@ and every warning with a symbol and a sentence.
 When reviewing a screen, ask:
 
 - **Does it feel slow?** Remove the delay. Beats are only for acknowledgements, and anything over 120 ms is a bug.
-- **Does it feel sloppy?** Make it more consistent: the same seed for the same thing, less wobble, aligned edges.
+- **Does it feel sloppy?** Make it more consistent: the same radius for the same thing, aligned edges.
 - **Does it feel sterile?** Add warmth through motion or words, not decoration.

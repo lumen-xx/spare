@@ -161,13 +161,12 @@ extension View {
 /// A soft wash behind a row that fades in a moment after the pointer arrives, as if the row noticed it.
 private struct HoverWash: ViewModifier {
     var radius: CGFloat
-    var seed: UInt64
     @State private var hovering = false
 
     func body(content: Content) -> some View {
         content
             .background {
-                SketchRect(radius: radius, seed: seed, wobble: 0.4)
+                RoundedRectangle.continuous(radius)
                     .fill(Ink.wash)
                     .opacity(hovering ? 1 : 0)
                     .allowsHitTesting(false)
@@ -185,6 +184,6 @@ private struct HoverLag: ViewModifier {
 }
 
 extension View {
-    func hoverWash(radius: CGFloat = 8, seed: UInt64 = 1) -> some View { modifier(HoverWash(radius: radius, seed: seed)) }
+    func hoverWash(radius: CGFloat = 8) -> some View { modifier(HoverWash(radius: radius)) }
     func hoverLag(_ hovering: Binding<Bool>) -> some View { modifier(HoverLag(hovering: hovering)) }
 }

@@ -212,9 +212,9 @@ struct SimulatorsView: View {
     private var runtimesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Systems", subtitle: "The iOS, watchOS, tvOS and visionOS versions simulators run")
-            Card(seed: 0x5157) {
+            Card {
                 ForEach(Array(model.runtimes.enumerated()), id: \.element.id) { index, runtime in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(runtime.id)).padding(.leading, 56).padding(.trailing, 14) }
+                    if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                     RuntimeRow(runtime: runtime, users: model.devices.filter { $0.runtime == runtime.name }.count) {
                         confirming = Confirmation(action: .deleteRuntime(runtime), title: "Delete \(runtime.name)?",
                                                   message: "\(runtime.bytes.map(Bytes.text) ?? "Its space") comes back. Simulators that run it stop working until you download it again in Xcode's Settings > Components.",
@@ -228,7 +228,7 @@ struct SimulatorsView: View {
     private var devicesSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Simulators", subtitle: "Each keeps its own apps and data")
-            Card(seed: 0xDE71) {
+            Card {
                 if model.devices.isEmpty {
                     HStack(spacing: 8) {
                         if model.loading { ThinkingDots() }
@@ -237,7 +237,7 @@ struct SimulatorsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }
                 ForEach(Array(model.devices.enumerated()), id: \.element.id) { index, device in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(device.id)).padding(.leading, 56).padding(.trailing, 14) }
+                    if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                     DeviceRow(device: device, erase: {
                         confirming = Confirmation(action: .erase(device), title: "Erase \(device.name)?",
                                                   message: "Its apps, data and settings are deleted for good. The simulator stays, as if new.",
@@ -343,7 +343,7 @@ private struct DeviceRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .contentShape(Rectangle())
-        .hoverWash(radius: 9, seed: Jitter.seed(device.id))
+        .hoverWash(radius: 9)
         .hoverLag($hovering)
         .padding(.horizontal, 3).padding(.vertical, 1)
         .help(device.problem ?? "")

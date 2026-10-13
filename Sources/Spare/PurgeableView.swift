@@ -224,13 +224,13 @@ struct PurgeableView: View {
         if !services.isEmpty || other || model.services == nil {
             VStack(alignment: .leading, spacing: 10) {
                 SectionHeading(title: title, subtitle: subtitle)
-                Card(seed: Jitter.seed(title)) {
+                Card {
                     ForEach(Array(services.enumerated()), id: \.element) { index, service in
-                        if index > 0 { SketchDivider(seed: Jitter.seed(service.rawValue)).padding(.leading, 56).padding(.trailing, 14) }
+                        if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                         row(service)
                     }
                     if other {
-                        if !services.isEmpty { SketchDivider(seed: 0x07E4).padding(.leading, 56).padding(.trailing, 14) }
+                        if !services.isEmpty { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                         PartRow(symbol: "ellipsis", title: "Other parts of macOS", about: "Smaller caches macOS keeps for itself.",
                                 bytes: model.other, active: false, measuring: false) { EmptyView() }
                     }
@@ -292,7 +292,7 @@ struct PurgeableView: View {
                             text: "It answered: “\(problem)” This usually passes; try again in a moment.",
                             actionTitle: "Try Again") { model.load() }
             } else {
-                Card(seed: 0x5A9) {
+                Card {
                     if model.snapshots.isEmpty {
                         HStack(spacing: 8) {
                             if model.listing { ThinkingDots() }
@@ -301,7 +301,7 @@ struct PurgeableView: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                     }
                     ForEach(Array(model.snapshots.enumerated()), id: \.element.id) { index, snapshot in
-                        if index > 0 { SketchDivider(seed: Jitter.seed(snapshot.id)).padding(.leading, 42).padding(.trailing, 12) }
+                        if index > 0 { RowDivider().padding(.leading, 42).padding(.trailing, 12) }
                         SnapshotRow(snapshot: snapshot)
                     }
                 }
@@ -342,7 +342,7 @@ private struct SnapshotRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CheckBox(state: model.selected.contains(snapshot.id) ? .on : .off, seed: snapshot.id) {
+            CheckBox(state: model.selected.contains(snapshot.id) ? .on : .off) {
                 if model.selected.contains(snapshot.id) { model.selected.remove(snapshot.id) } else { model.selected.insert(snapshot.id) }
             }
             .accessibilityLabel(snapshot.date.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? snapshot.name)

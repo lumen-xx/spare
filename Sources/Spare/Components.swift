@@ -156,7 +156,7 @@ struct FullDiskAccessNote: View {
     }
 }
 
-/// A hand-drawn circle with a tick, or with an exclamation mark when something needs a look. It waits for a breath,
+/// A circle with a tick, or with an exclamation mark when something needs a look. It waits for a breath,
 /// draws the circle, then the mark, and lands with a small bounce.
 struct DoneMark: View {
     let warning: Bool
@@ -166,12 +166,14 @@ struct DoneMark: View {
 
     var body: some View {
         let tint = warning ? Ink.warm : Ink.sage
-        let seed = Jitter.seed(warning ? "warning" : "done")
         ZStack {
-            SketchRect(radius: size / 2, seed: seed, wobble: 0.8, corners: 0.1).fill(tint.opacity(drawn ? 0.15 : 0))
-            SketchLoop(seed: seed)
+            Circle().fill(tint.opacity(drawn ? 0.15 : 0))
+            // Drawn from the upper left, clockwise.
+            Circle()
                 .trim(from: 0, to: drawn ? 1 : 0)
                 .stroke(tint, style: StrokeStyle(lineWidth: 1.7, lineCap: .round))
+                .rotationEffect(.degrees(-135))
+                .padding(0.85)
             if warning {
                 VStack(spacing: size * 0.09) {
                     Capsule().fill(tint).frame(width: 2.4, height: drawn ? size * 0.32 : 0)
@@ -179,7 +181,7 @@ struct DoneMark: View {
                 }
                 .offset(y: size * 0.02)
             } else {
-                CheckMark(seed: seed)
+                CheckMark()
                     .trim(from: 0, to: drawn ? 1 : 0)
                     .stroke(tint, style: StrokeStyle(lineWidth: 2.1, lineCap: .round, lineJoin: .round))
                     .padding(size * 0.24)
@@ -213,7 +215,7 @@ struct BannerView: View {
     var body: some View {
         if let banner = shared.banner {
             let warning = banner.failed || !banner.problems.isEmpty
-            let shape = SketchRect(radius: 16, seed: Jitter.seed(banner.title), wobble: 0.35, corners: 0.1)
+            let shape = RoundedRectangle.continuous(16)
             HStack(spacing: 13) {
                 DoneMark(warning: warning)
                 VStack(alignment: .leading, spacing: 2) {
@@ -255,8 +257,8 @@ struct BannerView: View {
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(shape.fill(Ink.lifted))
-            .overlay(SketchBorder(shape: shape, width: 0.75, swell: 0.3).fill(Ink.line).allowsHitTesting(false))
-            .deskShadow(shape, lift: 2.2, seed: shape.seed)
+            .overlay(shape.strokeBorder(Ink.line, lineWidth: 0.75).allowsHitTesting(false))
+            .deskShadow(shape, lift: 2.2)
             .padding(16)
             .frame(maxWidth: 780)
             .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
@@ -343,7 +345,7 @@ struct SearchField: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        let shape = SketchRect(radius: 8, seed: Jitter.seed(prompt), wobble: 0.3, corners: 0.15)
+        let shape = RoundedRectangle.continuous(8)
         HStack(spacing: 7) {
             Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
             TextField(prompt, text: $text).textFieldStyle(.plain).focused($focused)
@@ -356,7 +358,7 @@ struct SearchField: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(shape.fill(Ink.press))
-        .overlay { SketchFocusRing(focused: focused, radius: 8, seed: shape.seed) }
+        .overlay { FocusRing(focused: focused, radius: 8) }
         .animation(Motion.settle, value: text.isEmpty)
     }
 }
@@ -366,12 +368,12 @@ struct FloatingTray<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        let shape = SketchRect(radius: 14, seed: 0x7EA1, wobble: 0.35, corners: 0.1)
+        let shape = RoundedRectangle.continuous(14)
         HStack(spacing: 10) { content }
             .padding(.horizontal, 16).padding(.vertical, 10)
             .background(shape.fill(Ink.lifted))
-            .overlay(SketchBorder(shape: shape, width: 0.75, swell: 0.3).fill(Ink.line).allowsHitTesting(false))
-            .deskShadow(shape, lift: 1.6, seed: shape.seed)
+            .overlay(shape.strokeBorder(Ink.line, lineWidth: 0.75).allowsHitTesting(false))
+            .deskShadow(shape, lift: 1.6)
             .padding(.horizontal, 20).padding(.bottom, 14)
     }
 }
@@ -388,15 +390,14 @@ struct ActionBar<Content: View>: View {
 
 /// A table set on a card, with the paper showing around it.
 struct TableCard<Content: View>: View {
-    var seed: String
     @ViewBuilder var content: Content
     var body: some View {
-        Card(seed: Jitter.seed(seed), radius: 12) {
+        Card(radius: 12) {
             content
                 .scrollContentBackground(.hidden)
                 .alternatingRowBackgrounds(.disabled)
                 .scrollIndicators(.never)
-                .clipShape(SketchRect(radius: 11, seed: Jitter.seed(seed), wobble: 0.3))
+                .clipShape(RoundedRectangle.continuous(11))
                 .padding(1)
         }
         .padding(.horizontal, 18)

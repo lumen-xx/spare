@@ -59,14 +59,14 @@ struct SessionView: View {
                     .accessibilityLabel("More")
                 }
             }
-            Card(seed: Jitter.seed(session.id.uuidString)) {
+            Card {
                 let shown = expanded ? session.records : Array(session.records.prefix(5))
                 ForEach(Array(shown.enumerated()), id: \.element.id) { index, record in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(record.original)).padding(.leading, 42).padding(.trailing, 12) }
+                    if index > 0 { RowDivider().padding(.leading, 42).padding(.trailing, 12) }
                     RecordRow(record: record)
                 }
                 if session.records.count > 5 {
-                    SketchDivider(seed: Jitter.seed(session.title)).padding(.horizontal, 12)
+                    RowDivider().padding(.horizontal, 12)
                     Button(expanded ? "Show fewer" : "Show all \(session.records.count)") {
                         withAnimation(reduceMotion ? Motion.calm : Motion.expand) { expanded.toggle() }
                     }

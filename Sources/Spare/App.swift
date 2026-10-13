@@ -197,7 +197,7 @@ struct ContentView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 DiskSummary().padding(14).frame(maxWidth: .infinity, alignment: .leading)
                     .background(.bar)
-                    .overlay(alignment: .top) { SketchDivider(seed: 0xD15C) }
+                    .overlay(alignment: .top) { RowDivider() }
             }
         } detail: {
             Group {
@@ -268,14 +268,14 @@ struct DiskSummary: View {
                     Text(shared.volumeName).font(.spare(size: 12, weight: .semibold)).lineLimit(1)
                 }
                 let used = space.total > 0 ? Double(space.used) / Double(space.total) : 0
-                UsageBar(fraction: used, tint: used > 0.9 ? Ink.warm : nil, seed: 0xD15C)
+                UsageBar(fraction: used, tint: used > 0.9 ? Ink.warm : nil)
                 Text("\(Bytes.text(space.free)) free of \(Bytes.text(space.total))")
                     .font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
                     .contentTransition(.numericText())
                     .animation(Motion.count, value: space.free)
                 // What macOS can clear by itself is on the Purgeable Space page; here only what's free.
                 if let trash = shared.trashBytes, trash > 0 {
-                    SketchDivider(seed: 0x7A54).padding(.vertical, 2)
+                    RowDivider().padding(.vertical, 2)
                     HStack {
                         Text("Trash: \(Bytes.text(trash))").font(.spare(size: 11).monospacedDigit()).foregroundStyle(.secondary)
                             .contentTransition(.numericText())

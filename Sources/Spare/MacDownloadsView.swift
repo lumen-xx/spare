@@ -383,7 +383,7 @@ struct MacDownloadsView: View {
     private var canGo: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Can Go Now", subtitle: "Nothing on this Mac needs these")
-            Card(seed: 0xCA9) {
+            Card {
                 if let leftovers = model.leftovers, leftovers.isLeftover {
                     DownloadRow(symbol: "shippingbox", tint: Ink.sea, title: leftovers.product ?? "What a macOS update left behind",
                                 text: (leftovers.downloaded.map { "Downloaded \($0.formatted(date: .abbreviated, time: .omitted)). " } ?? "")
@@ -391,7 +391,7 @@ struct MacDownloadsView: View {
                                 bytes: leftovers.bytes) {
                         RevealButton(url: UpdateLeftovers.folder)
                     }
-                    SketchDivider(seed: 0x1EF7).padding(.leading, 56).padding(.trailing, 14)
+                    RowDivider().padding(.leading, 56).padding(.trailing, 14)
                 }
                 DownloadRow(symbol: "arrow.down.app", tint: (model.unused ?? 0) > 0 ? Ink.sea : .secondary,
                             title: "Downloads nothing uses any more", text: unusedText, bytes: model.unused,
@@ -416,7 +416,7 @@ struct MacDownloadsView: View {
     private var intelligence: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Apple Intelligence", subtitle: "Its models stay on this Mac while it's on")
-            Card(seed: 0xA1) {
+            Card {
                 HStack(alignment: .center, spacing: 12) {
                     SymbolTile(symbol: "brain.head.profile", tint: model.status?.state == .on ? Ink.ink : model.status?.state == .releasing ? Ink.warm : .secondary)
                     VStack(alignment: .leading, spacing: 3) {
@@ -499,7 +499,7 @@ struct MacDownloadsView: View {
         let waiting = model.leftovers.flatMap { $0.isLeftover ? nil : $0 }
         return VStack(alignment: .leading, spacing: 10) {
             SectionHeading(title: "Kept for macOS Features", subtitle: "What holds on to each, and what would let it go")
-            Card(seed: 0x6E9) {
+            Card {
                 if let waiting {
                     DownloadRow(symbol: "arrow.down.circle", tint: .secondary, title: waiting.product ?? "A macOS update",
                                 text: (waiting.downloaded.map { "Downloaded \($0.formatted(date: .abbreviated, time: .omitted)) and waiting to be installed. " }
@@ -509,7 +509,7 @@ struct MacDownloadsView: View {
                             Button("Software Update") { NSWorkspace.shared.open(url) }.spareButton(.secondary).controlSize(.small)
                         }
                     }
-                    if !assets.isEmpty { SketchDivider(seed: 0x3A17).padding(.leading, 56).padding(.trailing, 14) }
+                    if !assets.isEmpty { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                 }
                 if assets.isEmpty && waiting == nil {
                     HStack(spacing: 8) {
@@ -519,7 +519,7 @@ struct MacDownloadsView: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                 }
                 ForEach(Array(assets.enumerated()), id: \.element.id) { index, asset in
-                    if index > 0 { SketchDivider(seed: Jitter.seed(asset.id)).padding(.leading, 56).padding(.trailing, 14) }
+                    if index > 0 { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                     DownloadRow(symbol: asset.feature.symbol, tint: .secondary, title: asset.feature.rawValue,
                                 text: (model.holders[asset.feature] ?? asset.feature.about) + " " + asset.feature.remedy,
                                 bytes: asset.bytes, hidden: asset.hidden) {

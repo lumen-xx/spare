@@ -183,12 +183,12 @@ struct ExtensionsView: View {
                     .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
                 Spacer()
                 if mine.contains(where: { $0.item.origin == .macOS }) {
-                    Toggle("Hide macOS's own", isOn: $hideMacOS).toggleStyle(SketchCheckStyle()).fixedSize()
+                    Toggle("Hide macOS's own", isOn: $hideMacOS).toggleStyle(SpareCheckStyle()).fixedSize()
                 }
             }
             .padding(.horizontal, 22).padding(.top, 14).padding(.bottom, 12)
             .arrives(0)
-            TableCard(seed: "extensions-\(page.rawValue)") { table }.arrives(1, rise: 0)
+            TableCard { table }.arrives(1, rise: 0)
             actionBar.arrives(2)
         }
         .arrivalStage(replay: model.rows.isEmpty)
