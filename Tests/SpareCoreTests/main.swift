@@ -137,6 +137,10 @@ let found = Set(leftovers.map { $0.url.path.replacingOccurrences(of: home.path +
 check(found == ["Application Support/com.kept.app", "Caches/com.kept.app.ShipIt", "Application Support/Kept"],
       "finds an app's files by identifier and exact name only (\(found.sorted()))")
 
+check(Apps.company(of: "com.adobe.Photoshop") == "com.adobe", "reads the company part of an identifier")
+check(Apps.company(of: "com.github.facebook.watchman") == nil && Apps.company(of: "io.github.someone.tool") == nil,
+      "never treats a code host as a company")
+
 // MARK: Background items
 
 let plist = root.appendingPathComponent("agent.plist")

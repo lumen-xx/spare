@@ -14,8 +14,19 @@ extension LaunchItem.Scope {
 
 struct BackgroundView: View {
     @ObservedObject var model = BackgroundModel.shared
-    @State private var confirming: BackgroundModel.Row?
-    @State private var confirmingHelper: BackgroundModel.Helper?
+    /// What is waiting for confirmation. One alert for both kinds: a second alert modifier on the same view
+    /// silently replaces the first, so Remove did nothing for background items.
+    enum Pending: Identifiable {
+        case row(BackgroundModel.Row)
+        case helper(BackgroundModel.Helper)
+        var id: String {
+            switch self {
+            case .row(let row): "row:" + row.id
+            case .helper(let helper): "helper:" + helper.id
+            }
+        }
+    }
+    @State private var pending: Pending?
 
     var body: some View {
         ScrollView {
@@ -47,17 +58,19 @@ struct BackgroundView: View {
                     .disabled(model.loading).help("Look Again")
             }
         }
-        .alert(item: $confirming) { row in
-            Alert(title: Text("Remove \(row.title)?"),
-                  message: Text("It stops now and won't start again. \(row.item.scope == .user ? "" : "macOS asks for an administrator password. ")The file goes to the Trash, and History can put it back."),
-                  primaryButton: .destructive(Text("Remove")) { Task { await model.remove(row) } },
-                  secondaryButton: .cancel())
-        }
-        .alert(item: $confirmingHelper) { helper in
-            Alert(title: Text("Remove \(helper.url.lastPathComponent)?"),
-                  message: Text("Nothing starts this helper any more. macOS asks for an administrator password. History can put it back."),
-                  primaryButton: .destructive(Text("Remove")) { Task { await model.remove(helper) } },
-                  secondaryButton: .cancel())
+        .alert(item: $pending) { pending in
+            switch pending {
+            case .row(let row):
+                Alert(title: Text("Remove \(row.title)?"),
+                      message: Text("It stops now and won't start again. \(row.item.scope == .user ? "" : "macOS asks for an administrator password. ")The file goes to the Trash, and History can put it back."),
+                      primaryButton: .destructive(Text("Remove")) { Task { await model.remove(row) } },
+                      secondaryButton: .cancel())
+            case .helper(let helper):
+                Alert(title: Text("Remove \(helper.url.lastPathComponent)?"),
+                      message: Text("Nothing starts this helper any more. macOS asks for an administrator password. History can put it back."),
+                      primaryButton: .destructive(Text("Remove")) { Task { await model.remove(helper) } },
+                      secondaryButton: .cancel())
+            }
         }
         .onAppear { model.startIfNeeded() }
     }
@@ -71,7 +84,7 @@ struct BackgroundView: View {
             Panel {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { Divider().padding(.leading, 56) }
-                    BackgroundRow(row: row) { confirming = row }
+                    BackgroundRow(row: row) { pending = .row(row) }
                 }
             }
         }
@@ -95,7 +108,7 @@ struct BackgroundView: View {
                         }
                         Spacer()
                         RevealButton(url: helper.url)
-                        Button("Remove…") { confirmingHelper = helper }.controlSize(.small)
+                        Button("Remove…") { pending = .helper(helper) }.controlSize(.small)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
                 }

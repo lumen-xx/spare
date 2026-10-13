@@ -132,6 +132,19 @@ public enum Apps {
         }.sorted { $0.usage.bytes > $1.usage.bytes }
     }
 
+    /// Identifier prefixes that name a code host rather than a company: "com.github.facebook.watchman" has nothing
+    /// to do with GitHub Desktop, so these never tie one program to another.
+    public static let hostPrefixes: Set<String> = ["com.github", "io.github", "com.gitlab", "io.gitlab", "org.sourceforge",
+                                                   "net.sourceforge", "com.bitbucket", "org.bitbucket", "com.googlecode"]
+
+    /// The company part of an identifier ("com.adobe"), or nil when that part names a code host.
+    public static func company(of id: String) -> String? {
+        let parts = id.split(separator: ".")
+        guard parts.count >= 3 else { return nil }
+        let company = parts.prefix(2).joined(separator: ".")
+        return hostPrefixes.contains(company.lowercased()) ? nil : company
+    }
+
     /// Looks like a bundle identifier: three or more dot-separated parts, starting with a letter.
     static func looksLikeIdentifier(_ text: String) -> Bool {
         let parts = text.split(separator: ".", omittingEmptySubsequences: false)
@@ -201,7 +214,7 @@ public enum Apps {
             Orphan(bundleID: id, leftovers: leftovers.sorted { $0.usage.bytes > $1.usage.bytes },
                    newest: leftovers.compactMap { Catalog.modified($0.url) }.max())
         }.filter { orphan in
-            let company = orphan.bundleID.split(separator: ".").prefix(2).joined(separator: ".")
+            guard let company = company(of: orphan.bundleID) else { return true }
             let recent = orphan.newest.map { now.timeIntervalSince($0) < 30 * 86_400 } ?? false
             return !(recent && companyInUse(company))
         }.sorted { $0.bytes > $1.bytes }

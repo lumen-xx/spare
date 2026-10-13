@@ -402,7 +402,7 @@ final class AppsModel: ObservableObject {
                     var parts = label.split(separator: ".").map(String.init)
                     while parts.count >= 3 { jobs.insert(parts.joined(separator: ".")); parts.removeLast() }
                 }
-                let companies = Set((Array(installed) + Array(running) + labels).map { $0.split(separator: ".").prefix(2).joined(separator: ".") })
+                let companies = Set((Array(installed) + Array(running) + labels).compactMap { Apps.company(of: $0) })
                 return Apps.orphans(home: home, fullDiskAccess: fullDiskAccess, cancel: Cancellation(),
                                     companyInUse: { companies.contains($0) }) { id in
                     installed.contains(id) || running.contains(id) || jobs.contains(id) || AppLookup.url(for: id) != nil
@@ -535,10 +535,9 @@ final class BackgroundModel: ObservableObject {
             return (FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: ""), app, false)
         }
         if item.label.hasPrefix("homebrew.mxcl.") { return ("Homebrew: " + item.label.dropFirst("homebrew.mxcl.".count), nil, false) }
-        let parts = item.label.split(separator: ".")
-        if parts.count >= 3 {
-            let company = parts.prefix(2).joined(separator: ".") + "."
-            if let app = apps.first(where: { !$0.isApple && $0.bundleID.hasPrefix(company) }) { return (app.name, app.url, true) }
+        if let company = Apps.company(of: item.label),
+           let app = apps.first(where: { !$0.isApple && $0.bundleID.hasPrefix(company + ".") }) {
+            return (app.name, app.url, true)
         }
         return nil
     }
