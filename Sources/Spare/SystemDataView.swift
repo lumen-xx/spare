@@ -83,15 +83,24 @@ struct SystemDataView: View {
         .onAppear { model.startIfNeeded() }
     }
 
+    static let sizeNote = "macOS doesn't report how much each snapshot holds; neither tmutil nor APFS gives a size, which is why System Settings counts them under System Data. It reports one total for everything it can clear by itself: these snapshots, iCloud files that are also online, and caches it manages."
+
     private var snapshotsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Time Machine Snapshots").font(.system(size: 15, weight: .semibold))
-                    Text("Hourly copies of this disk Time Machine keeps while \(model.backupDisk.map { "“\($0)”" } ?? "the backup disk") isn't connected. macOS deletes them on its own when it needs room, so they count as space macOS can clear itself\(shared.space.map { " (\(Bytes.text($0.purgeable)) right now)" } ?? "").")
+                    Text("Hourly copies of this disk Time Machine keeps while \(model.backupDisk.map { "“\($0)”" } ?? "the backup disk") isn't connected. macOS deletes them on its own when it needs room, so they count as space macOS can clear itself.")
                         .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+                if let space = shared.space, !model.snapshots.isEmpty {
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text("Up to \(Bytes.text(space.purgeable))").font(.system(size: 12.5, weight: .semibold).monospacedDigit())
+                        Text("with other purgeable data").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    }
+                    .help(Self.sizeNote)
+                }
                 if !model.snapshots.isEmpty {
                     Button("Delete Selected…") { confirming = model.snapshots.filter { model.selected.contains($0.id) } }
                         .disabled(model.selected.isEmpty)
@@ -115,6 +124,11 @@ struct SystemDataView: View {
                                 .font(.system(size: 11)).foregroundStyle(.secondary)
                         }
                         Spacer()
+                        // APFS reports no size per snapshot; an emptied one is known to hold nothing.
+                        Text(snapshot.dataless ? Bytes.text(0) : "Size not reported")
+                            .font(.system(size: 12, weight: snapshot.dataless ? .medium : .regular).monospacedDigit())
+                            .foregroundStyle(snapshot.dataless ? .primary : .tertiary)
+                            .help(snapshot.dataless ? "macOS already gave this snapshot's space back." : Self.sizeNote)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 8)
                 }
