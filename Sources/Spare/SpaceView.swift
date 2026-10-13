@@ -57,7 +57,7 @@ struct SpaceView: View {
                 ForEach(Array(model.trail.enumerated()), id: \.offset) { index, url in
                     if index > 0 { Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).foregroundStyle(.tertiary) }
                     Button { model.go(to: index) } label: {
-                        Text(index == 0 ? Catalog.tilde(url, home: home) : url.lastPathComponent)
+                        Text(index > 0 ? url.lastPathComponent : url == home ? "Home" : Catalog.tilde(url, home: home))
                             .font(.system(size: 12, weight: index == model.trail.count - 1 ? .semibold : .regular))
                             .foregroundStyle(index == model.trail.count - 1 ? .primary : .secondary)
                     }

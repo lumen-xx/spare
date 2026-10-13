@@ -8,6 +8,13 @@ struct SettingsView: View {
     @AppStorage("inactiveDays") private var inactiveDays = 30
 
     var body: some View {
+        // Full width so the toolbar's edge spans the window, with the rows kept to a readable width in the middle.
+        GeometryReader { geometry in
+            form.contentMargins(.horizontal, max(20, (geometry.size.width - 680) / 2), for: .scrollContent)
+        }
+    }
+
+    private var form: some View {
         Form {
             Section {
                 ForEach(roots, id: \.self) { root in
@@ -47,8 +54,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 480)
-        .fixedSize(horizontal: false, vertical: true)
+        .scrollIndicators(.never)
     }
 
     private func add() {

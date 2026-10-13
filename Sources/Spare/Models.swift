@@ -480,125 +480,6 @@ func launchctl(_ arguments: [String]) -> Int32 {
     return process.terminationStatus
 }
 
-// MARK: - Background items
-
-@MainActor
-final class BackgroundModel: ObservableObject {
-    static let shared = BackgroundModel()
-
-    struct Row: Identifiable {
-        let item: LaunchItem
-        var owner: String?
-        var ownerURL: URL?
-        /// The owner is a guess from the label's company prefix.
-        var guessed = false
-        var status: Launchd.Status?
-        var id: String { item.id }
-        var title: String { owner ?? item.label }
-    }
-
-    /// A privileged helper no job starts any more.
-    struct Helper: Identifiable {
-        let url: URL
-        var id: String { url.path }
-    }
-
-    @Published private(set) var rows: [Row] = []
-    @Published private(set) var helpers: [Helper] = []
-    @Published private(set) var loading = false
-    @Published private(set) var working = false
-    private var started = false
-
-    func startIfNeeded() { if !started { load() } }
-
-    func load() {
-        started = true
-        loading = true
-        Task {
-            let (items, services, helpers, apps) = await background { () -> ([LaunchItem], [String: Launchd.Status], [URL], [InstalledApp]) in
-                let apps = Apps.installed(home: home)
-                let items = LaunchItem.all(home: home, apps: apps.filter { !$0.isApple }.map(\.url))
-                var services = Launchd.services(domain: "system")
-                services.merge(Launchd.services(domain: "gui/\(getuid())")) { system, _ in system }
-                let programs = Set(items.compactMap(\.program))
-                let helpers = Catalog.list(URL(fileURLWithPath: "/Library/PrivilegedHelperTools")).filter { !programs.contains($0.path) }
-                return (items, services, helpers, apps)
-            }
-            self.rows = items.map { item in
-                var row = Row(item: item, status: services[item.label])
-                if let owner = Self.owner(of: item, apps: apps) { row.owner = owner.name; row.ownerURL = owner.url; row.guessed = owner.guessed }
-                return row
-            }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
-            self.helpers = helpers.map { Helper(url: $0) }
-            self.loading = false
-        }
-    }
-
-    static func owner(of item: LaunchItem, apps: [InstalledApp]) -> (name: String, url: URL?, guessed: Bool)? {
-        for id in item.associatedBundleIDs {
-            if let url = AppLookup.url(for: id) { return (FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: ""), url, false) }
-        }
-        if let app = item.programApp, FileManager.default.fileExists(atPath: app.path) {
-            return (FileManager.default.displayName(atPath: app.path).replacingOccurrences(of: ".app", with: ""), app, false)
-        }
-        if item.label.hasPrefix("homebrew.mxcl.") { return ("Homebrew: " + item.label.dropFirst("homebrew.mxcl.".count), nil, false) }
-        if let company = Apps.company(of: item.label),
-           let app = apps.first(where: { !$0.isApple && $0.bundleID.hasPrefix(company + ".") }) {
-            return (app.name, app.url, true)
-        }
-        return nil
-    }
-
-    func remove(_ row: Row) async {
-        guard !working, row.item.scope != .app else { return }
-        working = true
-        defer { working = false }
-        let item = row.item
-        if item.scope == .user {
-            launchctl(["bootout", "gui/\(getuid())/\(item.label)"])
-            let outcome = await Trasher.move([(item.url, nil)], title: "Removed \(row.title)")
-            if outcome.session != nil { rows.removeAll { $0.id == row.id } }
-            Shared.shared.report(outcome, title: outcome.session.map { _ in "Removed \(row.title) and stopped it" })
-            return
-        }
-        let domain = item.scope == .system ? "system" : "gui/\(getuid())"
-        if let record = moveAsAdministrator(item.url, before: "launchctl bootout \(domain)/\(Privileged.quoted(item.label)) 2>/dev/null; ",
-                                            prompt: "Spare wants to remove \(row.title)'s background item.") {
-            let session = TrashSession(title: "Removed \(row.title)", records: [record], bytes: 0)
-            HistoryModel.shared.add(session)
-            rows.removeAll { $0.id == row.id }
-            Shared.shared.banner = .init(title: "Removed \(row.title) and stopped it", detail: "It's in the Trash. History can put it back.", session: session.id)
-        }
-    }
-
-    func remove(_ helper: Helper) async {
-        guard !working else { return }
-        working = true
-        defer { working = false }
-        if let record = moveAsAdministrator(helper.url, before: "", prompt: "Spare wants to remove a leftover helper tool.") {
-            let session = TrashSession(title: "Removed \(helper.url.lastPathComponent)", records: [record], bytes: 0)
-            HistoryModel.shared.add(session)
-            helpers.removeAll { $0.id == helper.id }
-            Shared.shared.banner = .init(title: "Moved \(helper.url.lastPathComponent) to the Trash", detail: nil, session: session.id)
-        }
-    }
-
-    /// Moves a file only root may touch into the Trash, handing it to the person.
-    private func moveAsAdministrator(_ url: URL, before: String, prompt: String) -> TrashRecord? {
-        let trash = home.appendingPathComponent(".Trash")
-        var target = trash.appendingPathComponent(url.lastPathComponent)
-        if FileManager.default.fileExists(atPath: target.path) {
-            target = trash.appendingPathComponent(url.deletingPathExtension().lastPathComponent + " \(Int(Date().timeIntervalSince1970))." + url.pathExtension)
-        }
-        let command = before + "mv \(Privileged.quoted(url.path)) \(Privileged.quoted(target.path)) && chown -R \(getuid()) \(Privileged.quoted(target.path))"
-        if let problem = Privileged.run(command, prompt: prompt) {
-            if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem) }
-            return nil
-        }
-        return TrashRecord(original: url.path, trashed: target.path, bytes: nil)
-    }
-}
-
 // MARK: - History
 
 @MainActor
@@ -621,21 +502,28 @@ final class HistoryModel: ObservableObject {
 
     func session(_ id: UUID) -> TrashSession? { sessions.first { $0.id == id } }
 
-    /// Puts items back, asking for a password for ones that came from folders only an administrator can change.
+    /// Puts items back. Ones that came from folders only an administrator can change go back together, after one
+    /// password prompt.
     @discardableResult
     func putBack(_ records: [TrashRecord]) -> [String] {
         var problems: [String] = []
+        var guarded: [TrashRecord] = []
         for record in records where record.state == .inTrash {
             do { try Trash.putBack(record) }
-            catch where Trash.isPermission(error) {
-                let command = "mkdir -p \(Privileged.quoted(URL(fileURLWithPath: record.original).deletingLastPathComponent().path)) && "
-                    + "[ ! -e \(Privileged.quoted(record.original)) ] && mv \(Privileged.quoted(record.trashed)) \(Privileged.quoted(record.original)) && "
-                    + "chown -R root:wheel \(Privileged.quoted(record.original))"
-                if let problem = Privileged.run(command, prompt: "Spare wants to put an item back."), problem != "Cancelled." {
-                    problems.append("\(URL(fileURLWithPath: record.original).lastPathComponent): \(problem)")
-                }
-            } catch {
-                problems.append("\(URL(fileURLWithPath: record.original).lastPathComponent): \(error.localizedDescription)")
+            catch where Trash.isPermission(error) { guarded.append(record) }
+            catch { problems.append("\(URL(fileURLWithPath: record.original).lastPathComponent): \(error.localizedDescription)") }
+        }
+        if !guarded.isEmpty {
+            let command = guarded.map { record in
+                let original = Privileged.quoted(record.original)
+                return "(mkdir -p \(Privileged.quoted(URL(fileURLWithPath: record.original).deletingLastPathComponent().path)) && "
+                    + "[ ! -e \(original) ] && mv \(Privileged.quoted(record.trashed)) \(original) && chown -R root:wheel \(original))"
+            }.joined(separator: "; ") + "; true"
+            if let problem = Privileged.run(command, prompt: "Spare wants to put items back where they were."), problem != "Cancelled." {
+                problems.append(problem)
+            }
+            for record in guarded where record.state == .inTrash {
+                problems.append("\(URL(fileURLWithPath: record.original).lastPathComponent): still in the Trash")
             }
         }
         revision += 1
@@ -652,7 +540,7 @@ final class HistoryModel: ObservableObject {
         // What was put back can be found again.
         if session.title == "Cleanup" { CleanupModel.shared.scanIfStarted() }
         if session.title.hasPrefix("Uninstalled") || session.title.hasPrefix("Leftovers") { AppsModel.shared.load() }
-        if session.title.hasPrefix("Removed") { BackgroundModel.shared.load() }
+        if session.title.hasPrefix("Removed") { StartupModel.shared.load(); ExtensionsModel.shared.load() }
     }
 
     func forget(_ id: UUID) {

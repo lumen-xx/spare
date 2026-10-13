@@ -6,6 +6,7 @@ enum Entry {
     static func main() {
         // A plain-text report of what a cleanup would find, for checking Spare from Terminal. It only reads.
         if CommandLine.arguments.contains("--report") { Report.run(); exit(0) }
+        if CommandLine.arguments.contains("--inventory") { Report.inventory(); exit(0) }
         SpareApp.main()
     }
 }
@@ -25,13 +26,15 @@ struct SpareApp: App {
                     .disabled(!Updates.shared.available)
             }
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") { Navigation.shared.page = .settings }.keyboardShortcut(",")
+            }
             CommandMenu("Scan") {
                 Button("Scan Again") { CleanupModel.shared.scan() }.keyboardShortcut("r")
                 Divider()
                 Button("Empty Trash…") { Shared.shared.emptyTrash() }.keyboardShortcut(.delete, modifiers: [.command, .shift])
             }
         }
-        Settings { SettingsView() }
     }
 }
 
@@ -49,57 +52,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 enum Page: String, CaseIterable, Identifiable {
-    case cleanup = "Cleanup", space = "Space", apps = "Apps", background = "Background Items", history = "History"
+    case cleanup = "Cleanup", space = "Space", systemData = "System Data"
+    case apps = "Apps", packages = "Packages", loginItems = "Login Items", background = "Background Items", extensions = "Drivers & Extensions"
+    case history = "History", settings = "Settings"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .cleanup: "sparkles"
         case .space: "chart.bar.doc.horizontal"
+        case .systemData: "internaldrive"
         case .apps: "app.dashed"
+        case .packages: "shippingbox"
+        case .loginItems: "power"
         case .background: "gearshape.2"
+        case .extensions: "puzzlepiece.extension"
         case .history: "clock.arrow.circlepath"
+        case .settings: "gearshape"
         }
+    }
+    static let freeUpSpace: [Page] = [.cleanup, .space, .systemData]
+    static let installed: [Page] = [.apps, .packages, .loginItems, .background, .extensions]
+}
+
+/// Which page is showing, shared so menu commands such as Settings… can switch it.
+@MainActor
+final class Navigation: ObservableObject {
+    static let shared = Navigation()
+    // Plain published state saved on change: an @AppStorage selection could stop updating the detail column after
+    // the preference changed outside the app. `-section Apps` on the command line still picks the first page.
+    @Published var page = Page(rawValue: UserDefaults.standard.string(forKey: "section") ?? "") ?? .cleanup {
+        didSet { UserDefaults.standard.set(page.rawValue, forKey: "section") }
     }
 }
 
 struct ContentView: View {
-    // Kept in plain state and saved on change: an @AppStorage selection could stop updating the detail column after
-    // the preference changed outside the app. `-section Apps` on the command line still picks the first page.
-    @State private var section = Page(rawValue: UserDefaults.standard.string(forKey: "section") ?? "") ?? .cleanup
+    @ObservedObject private var navigation = Navigation.shared
     @ObservedObject private var shared = Shared.shared
     @ObservedObject private var cleanup = CleanupModel.shared
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding(get: { section }, set: { if let value = $0 { section = value } })) {
-                ForEach(Page.allCases) { item in
-                    Label(item.rawValue, systemImage: item.symbol)
-                        .badge(badge(for: item))
-                        .tag(item)
-                }
+            List(selection: Binding(get: { navigation.page }, set: { if let value = $0 { navigation.page = value } })) {
+                Section("Free Up Space") { ForEach(Page.freeUpSpace) { row($0) } }
+                Section("Installed") { ForEach(Page.installed) { row($0) } }
+                Section { row(.history); row(.settings) }
             }
-            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
+            .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 290)
             .safeAreaInset(edge: .bottom) { DiskSummary().padding(14) }
         } detail: {
             Group {
-                switch section {
+                switch navigation.page {
                 case .cleanup: CleanupView()
                 case .space: SpaceView()
+                case .systemData: SystemDataView()
                 case .apps: AppsView()
-                case .background: BackgroundView()
+                case .packages: PackagesView()
+                case .loginItems: StartupView(part: .login)
+                case .background: StartupView(part: .background)
+                case .extensions: ExtensionsView()
                 case .history: HistoryView()
+                case .settings: SettingsView()
                 }
             }
-            .navigationTitle(section.rawValue)
+            .navigationTitle(navigation.page.rawValue)
         }
         .overlay(alignment: .bottom) {
             BannerView().animation(.snappy, value: shared.banner)
         }
-        .onChange(of: section) { _, value in UserDefaults.standard.set(value.rawValue, forKey: "section") }
     }
 
-    private func badge(for item: Page) -> Text? {
-        guard item == .cleanup, !cleanup.isScanning, cleanup.scannedAt != nil, cleanup.foundBytes > 0 else { return nil }
+    private func row(_ page: Page) -> some View {
+        Label(page.rawValue, systemImage: page.symbol)
+            .badge(badge(for: page))
+            .tag(page)
+    }
+
+    private func badge(for page: Page) -> Text? {
+        guard page == .cleanup, !cleanup.isScanning, cleanup.scannedAt != nil, cleanup.foundBytes > 0 else { return nil }
         return Text(Bytes.text(cleanup.foundBytes))
     }
 }
@@ -144,6 +173,33 @@ struct DiskSummary: View {
 
 /// Prints what Spare would find, without changing anything.
 enum Report {
+    /// What has been added to this Mac: startup items, packages, extensions and macOS's own data.
+    static func inventory() {
+        var started = Date()
+        func lap(_ title: String) { print("  (\(String(format: "%.1f", Date().timeIntervalSince(started))) s)\n"); started = Date(); print(title) }
+        print("Login & Background")
+        for row in StartupModel.collect().sorted(by: { $0.name < $1.name }) {
+            print("  \(row.state.rawValue.padding(toLength: 12, withPad: " ", startingAt: 0)) \(row.kind.padding(toLength: 20, withPad: " ", startingAt: 0)) \(row.name) — from \(row.from), \(row.place)\(row.origin == .thirdParty ? "" : " [\(row.origin.label)]")")
+        }
+        lap("Packages")
+        let (packages, managers) = PackagesModel.collect()
+        print("  managers: \(managers.map(\.rawValue).joined(separator: ", "))")
+        for manager in managers { print("  \(manager.rawValue): \(packages.filter { $0.manager == manager }.count)") }
+        for package in packages.filter({ !$0.neededBy.isEmpty }).prefix(6) { print("  \(package.name) needed by \(package.neededBy.joined(separator: ", "))\(package.requested ? "" : " (dependency)")") }
+        lap("Drivers & Extensions")
+        let extensions = ExtensionsModel.collect()
+        for category in Extension.Category.allCases {
+            let items = extensions.filter { $0.category == category }
+            guard !items.isEmpty else { continue }
+            let origins = Dictionary(grouping: items, by: \.origin).map { "\($0.value.count) \($0.key.label)" }.sorted().joined(separator: ", ")
+            print("  \(category.rawValue): \(origins). e.g. \(items.prefix(3).map { $0.name + ($0.owner.map { " (in \($0))" } ?? "") }.joined(separator: "; "))")
+        }
+        lap("System Data")
+        print("  snapshots: \(Snapshots.parse(Shell.run("/usr/bin/tmutil", ["listlocalsnapshots", "/"]).output).map(\.name))")
+        for asset in SystemAssets.measure() { print("  \(asset.feature.rawValue): \(Bytes.text(asset.bytes)) in \(asset.folders.count) folders") }
+        lap("done")
+    }
+
     static func run() {
         let fullDiskAccess = Permissions.fullDiskAccess()
         let context = ScanContext(home: home, projectRoots: Preferences.projectRoots, inactiveAfter: Double(Preferences.inactiveDays) * 86_400,

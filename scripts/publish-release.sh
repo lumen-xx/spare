@@ -35,6 +35,8 @@ gh release create "v$VERSION" \
     --repo "$REPOSITORY" --title "Spare $VERSION" \
     --notes-file docs/RELEASE_NOTES.md
 cp "$RELEASE_DIR/appcast.xml" "$FEED_CHECKOUT/appcast.xml"
-git -C "$FEED_CHECKOUT" add appcast.xml
+# The release page describes the current version.
+cp docs/RELEASE_README.md "$FEED_CHECKOUT/README.md"
+git -C "$FEED_CHECKOUT" add appcast.xml README.md
 git -C "$FEED_CHECKOUT" commit -m "Publish signed Spare $VERSION appcast"
 git -C "$FEED_CHECKOUT" push -u origin main

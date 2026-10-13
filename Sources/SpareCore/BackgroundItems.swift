@@ -158,6 +158,33 @@ public enum Launchd {
         return parse(String(decoding: data, as: UTF8.self))
     }
 
+    /// Jobs turned off with `launchctl disable` in a domain, from `launchctl print-disabled`: label → turned off.
+    public static func disabled(domain: String) -> [String: Bool] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+        process.arguments = ["print-disabled", domain]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return [:] }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return parseDisabled(String(decoding: data, as: UTF8.self))
+    }
+
+    /// Lines such as `"com.vendor.agent" => disabled` (or `=> true` on older macOS).
+    public static func parseDisabled(_ output: String) -> [String: Bool] {
+        var result: [String: Bool] = [:]
+        for line in output.split(separator: "\n") {
+            let parts = line.components(separatedBy: "=>")
+            guard parts.count == 2 else { continue }
+            let label = parts[0].trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            let value = parts[1].trimmingCharacters(in: .whitespaces)
+            result[label] = value == "disabled" || value == "true"
+        }
+        return result
+    }
+
     /// Reads the "services = { pid status label }" block of `launchctl print`.
     public static func parse(_ output: String) -> [String: Status] {
         var result: [String: Status] = [:]

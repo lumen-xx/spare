@@ -112,7 +112,7 @@ struct FullDiskAccessNote: View {
                 Text("Spare can't see everything yet").font(.system(size: 13, weight: .semibold))
                 Text(compact ? "Locked folders stay closed until Spare has Full Disk Access."
                              : "Without Full Disk Access, macOS hides Downloads, Documents, Desktop, iPhone backups, Mail and other apps' data. Spare only reads; it never changes anything without asking.")
-                    .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
             }
             Spacer(minLength: 8)
             Button("Open Settings…") { Permissions.openFullDiskAccessSettings() }

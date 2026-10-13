@@ -23,7 +23,10 @@ Spare is not notarized yet. Only run this for Spare downloaded here.
 - **Your Call**: old downloads, iPhone backups, Xcode archives and AI models. Listed, never selected for you.
 - **Space**: which folders take the most room, as deep as you like.
 - **Apps**: uninstall an app together with the files it keeps in your Library, and find leftovers of apps you already removed.
-- **Background Items**: everything that starts on its own, which app it belongs to, and which ones were left behind.
+- **Packages**: Homebrew, npm, pnpm, Bun, Cargo, uv and pipx packages, with what needs what. Uninstall several at once.
+- **Login Items** and **Background Items**: everything that starts on its own. Select several, then turn them off, on, or remove them.
+- **Drivers & Extensions**: system extensions, drivers, audio plug-ins, fonts, input methods and more. macOS's own are marked and locked.
+- **System Data**: Time Machine snapshots on this disk, and what macOS downloaded for Apple Intelligence, dictation and voices.
 - **History**: everything Spare moved to the Trash, with Put Back.
 
 Spare never deletes anything itself, has no background process or menu bar icon, and never sends anything anywhere.

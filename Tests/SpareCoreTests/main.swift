@@ -165,6 +165,9 @@ let services = Launchd.parse(printed)
 check(services["com.vendor.agent"] == Launchd.Status(loaded: true, pid: nil), "reads a loaded job that isn't running")
 check(services["application.cc.ffitch.shottr.63416020.63416029"]?.pid == 64571, "reads a running job's process")
 
+let disabledJobs = Launchd.parseDisabled("\tdisabled services = {\n\t\t\"com.docker.helper\" => enabled\n\t\t\"homebrew.mxcl.redis\" => disabled\n\t\t\"old.style\" => true\n\t}\n")
+check(disabledJobs == ["com.docker.helper": false, "homebrew.mxcl.redis": true, "old.style": true], "reads which jobs are turned off")
+
 // MARK: History
 
 let history = TrashHistory(file: root.appendingPathComponent("History.json"))
@@ -200,6 +203,94 @@ writer.waitUntilExit()
 
 check(Catalog.isSystemService("familycircled") && Catalog.isSystemService("akd"), "recognises macOS service caches")
 check(!Catalog.isSystemService("Zed") && !Catalog.isSystemService("bun") && !Catalog.isSystemService("com.vendor.app"), "doesn't mistake app caches for macOS's")
+
+// MARK: Login items, packages, extensions, snapshots
+
+let btm = """
+    ========================
+     Records for UID 501 : B0048BD8
+    ========================
+
+     #1:
+                     UUID: F88247B4
+                     Name: postgres
+           Developer Name: (null)
+                     Type: legacy agent (0x10008)
+              Disposition: [enabled, allowed, notified] (0xb)
+               Identifier: 8.homebrew.mxcl.postgresql@17
+                      URL: /Users/501/Library/LaunchAgents/homebrew.mxcl.postgresql@17.plist
+
+     #2:
+                     UUID: 2C4B5EF1
+                     Name: Alcove
+           Developer Name: Henrik Ruscon
+                     Type: app (0x2)
+              Disposition: [disabled, allowed, not notified] (0x2)
+               Identifier: 2.com.henrikruscon.Alcove
+                      URL: /Applications/Alcove.app
+        Bundle Identifier: com.henrikruscon.Alcove
+    ========================
+     Records for UID 502 : 571DA6F9
+    ========================
+
+     #1:
+                     UUID: OTHER
+                     Name: Someone else's
+                     Type: app (0x2)
+              Disposition: [enabled, allowed] (0x3)
+               Identifier: 2.other
+    """
+let records = LoginItems.parse(btm, uid: 501)
+check(records.count == 2 && records[0].isLegacy && records[0].enabled && records[0].allowed, "reads login records of one account only")
+check(records[1].developer == "Henrik Ruscon" && !records[1].enabled && records[1].bundleID == "com.henrikruscon.Alcove" && !records[1].opensAtLogin,
+      "reads a disabled app record, telling disabled from enabled")
+
+let brewJSON = Data("""
+    {"formulae": [
+      {"name": "postgresql@14", "desc": "Database", "dependencies": ["icu4c", "openssl@3"], "installed": [{"version": "14.1", "installed_on_request": true}]},
+      {"name": "icu4c", "desc": "Unicode", "dependencies": [], "installed": [{"version": "76", "installed_on_request": false}]},
+      {"name": "openssl@3", "desc": "TLS", "dependencies": ["ca-certificates"], "installed": [{"version": "3.4", "installed_on_request": false}]}
+    ], "casks": [{"token": "aerospace", "name": ["AeroSpace"], "desc": "Tiling", "installed": "0.19", "depends_on": {"formula": ["openssl@3"]}}]}
+    """.utf8)
+let brew = PackageParsing.homebrew(brewJSON, prefix: "/opt/homebrew")
+let icu = brew.first { $0.name == "icu4c" }
+let openssl = brew.first { $0.name == "openssl@3" }
+check(icu?.requested == false && icu?.neededBy == ["postgresql@14"], "knows a formula was installed for another one")
+check(openssl?.neededBy == ["aerospace", "postgresql@14"] && openssl?.needs == [], "lists formulae and apps that need a package, ignoring missing ones")
+check(brew.first { $0.name == "aerospace" }?.isCask == true && brew.first { $0.name == "aerospace" }?.reinstall == "brew install --cask aerospace",
+      "reads casks and how to install them again")
+let npm = PackageParsing.npm(Data(#"{"dependencies": {"npm": {"version": "10"}, "corepack": {"version": "0.3"}, "http-server": {"version": "14.1.1"}}}"#.utf8), root: "/opt/homebrew/lib/node_modules")
+check(npm.map(\.name) == ["http-server"] && npm.first?.location?.path == "/opt/homebrew/lib/node_modules/http-server", "lists global npm packages but not npm itself")
+let bun = PackageParsing.bun("/Users/x/.bun/install/global node_modules (3)\n├── @openai/codex@0.91.0\n└── react-devtools@7.0.1\n", root: "/r")
+check(bun.map(\.name) == ["@openai/codex", "react-devtools"] && bun.first?.version == "0.91.0", "reads Bun's tree, scoped names included")
+let cargo = PackageParsing.cargo("rustlings v6.5.0:\n    rustlings\nripgrep v14.1.0:\n    rg\n", bin: "/b")
+check(cargo.map(\.name) == ["rustlings", "ripgrep"] && cargo.last?.location?.path == "/b/rg" && cargo.last?.version == "14.1.0", "reads Cargo's installed tools and their binaries")
+
+let extensionsText = """
+    4 extension(s)
+    --- com.apple.system_extension.network_extension (Go to 'System Settings > General > Login Items & Extensions > Network Extensions' to modify these system extension(s))
+    enabled\tactive\tteamID\tbundleID (version)\tname\t[state]
+    *\t*\tW5364U7YZB\tio.tailscale.ipn.macsys.network-extension (1.102.4/101.102.4)\tTailscale Network Extension\t[activated enabled]
+    \t\tW5364U7YZB\tio.tailscale.ipn.macsys.network-extension (1.98.8/101.98.8)\tTailscale Network Extension\t[terminated waiting to uninstall on reboot]
+    """
+let systemExtensions = Extensions.systemExtensions(extensionsText)
+check(systemExtensions.count == 2 && systemExtensions[0].state == "activated enabled" && systemExtensions[0].detail?.hasPrefix("Network extension · Version 1.102.4") == true,
+      "reads system extensions with their kind, version and state")
+check(Extensions.receipts("com.apple.pkg.Core\nnet.mullvad.vpn\n").map(\.name) == ["net.mullvad.vpn"], "lists installer packages that aren't Apple's")
+
+let snapshots = Snapshots.parse("Snapshots for disk /:\ncom.apple.TimeMachine.2026-10-09-124133.local (dataless)\ncom.apple.TimeMachine.2026-10-12-134623.local\n")
+check(snapshots.count == 2 && snapshots[0].dataless && !snapshots[1].dataless && snapshots[1].stamp == "2026-10-12-134623" && snapshots[1].date != nil,
+      "reads Time Machine's local snapshots and their dates")
+
+check(Origins.origin(of: URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")) != .thirdParty, "knows Finder is Apple's")
+check(Origins.origin(of: root.appendingPathComponent("lonely.bin")) == .thirdParty, "treats a file no installer put there as added")
+
+check(SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Siri_Understanding") == .appleIntelligence
+      && SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Speech_AutomaticSpeechRecognition") == .dictation
+      && SystemAsset.Feature.of("com_apple_MobileAsset_UAF_Siri_TextToSpeech") == .voices
+      && SystemAsset.Feature.of("com_apple_MobileAsset_MacSoftwareUpdate") == .updates
+      && SystemAsset.Feature.of("com_apple_MobileAsset_PKITrustStore") == .other,
+      "sorts macOS's downloads by the feature that needs them")
 
 // MARK: Catalog
 

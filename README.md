@@ -8,18 +8,23 @@ An honest Mac cleaner for Apple silicon, macOS 14 or newer. It shows what takes 
 - **Your Call**: old installers and large unopened files in Downloads, iPhone and iPad backups, Xcode archives, downloaded AI models. Listed, never selected.
 - **Space**: folder sizes from your home folder down, measured in parallel; any folder can be opened.
 - **Apps**: size of each app plus the files it keeps in ~/Library, matched by bundle identifier or exact name only. Uninstalling quits the app, stops its login agents and moves everything to the Trash. Leftovers lists files named after bundle identifiers that no installed app, running process or background job uses.
-- **Background Items**: every launchd job in ~/Library/LaunchAgents, /Library/LaunchAgents and /Library/LaunchDaemons, plus jobs inside apps, with owner, schedule, state and plain notes for common ones. Jobs whose program is gone and helper tools nothing starts are flagged. Removing system jobs goes through macOS's administrator prompt.
+- **Packages**: Homebrew formulae and casks with what needs what, and global npm, pnpm, Bun, Cargo, uv and pipx packages. Uninstalling runs each manager's own command; Homebrew's unused formulae can be removed with `brew autoremove`.
+- **Login Items** and **Background Items**: tables with multiple selection. Launchd jobs in ~/Library/LaunchAgents, /Library/LaunchAgents and /Library/LaunchDaemons can be turned off (`launchctl disable` + `bootout`), on again, or removed; items apps register with macOS (read from `sfltool dumpbtm`, the list System Settings shows) link to Login Items settings. Helper tools nothing starts are flagged. One administrator prompt covers every system item selected.
+- **Drivers & Extensions**: system extensions (`systemextensionsctl`), kernel extensions, audio drivers and plug-ins, camera and printer drivers, input methods, Quick Look and Spotlight plug-ins, settings panes, screen savers, fonts, services, colour pickers and installer packages. Origin comes from installer receipts (`pkgutil --file-info`) and Apple's code signature: macOS's own is locked, Apple's optional additions are labelled.
+- **System Data**: Time Machine local snapshots (deleted with `tmutil deletelocalsnapshots` after a password prompt) and /System/Library/AssetsV2 grouped by feature (Apple Intelligence, dictation, voices, updates). System Integrity Protection guards those, so Spare links to the setting that lets macOS remove them.
 - **History**: every move, with Put Back, until the Trash is emptied.
+- **Settings**: project folders, Full Disk Access and updates, as the last page of the window.
 
 ## Honesty rules
 
-- Nothing is deleted by Spare. Items go to the Trash; History records where each came from.
+- Nothing is deleted by Spare. Items go to the Trash; History records where each came from. Package managers delete their own packages, and Spare says so before they run.
+- Nothing a running program has open is offered or moved (open files are read through libproc, as lsof does), so the Trash never ends up holding files an app still writes to.
 - Sizes are allocated blocks on disk. A file hard-linked from elsewhere (for example a pnpm store) is shown as shared and not counted as freed. APFS clones can't be told apart, so a cloned file counts in full.
 - macOS's own caches, documents, photos, mail and messages are never offered.
 - Without Full Disk Access, Spare doesn't open guarded folders at all, so macOS never asks for them one by one; they're shown as locked.
 - No background process, no menu bar item, no notifications, no network access except optional update checks.
 
-`.build/debug/Spare --report` prints what a cleanup would find without changing anything.
+`.build/debug/Spare --report` prints what a cleanup would find, and `--inventory` what has been added to the Mac, without changing anything.
 
 ## Build and verify
 

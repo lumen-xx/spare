@@ -170,3 +170,42 @@ enum AppLookup {
         return image
     }
 }
+
+/// Moves items only an administrator may change (in /Library) into the person's Trash, all with one password
+/// prompt, and records them in History like anything else.
+@MainActor
+enum AdminTrash {
+    /// - Parameters:
+    ///   - before: commands run first, as root, such as stopping a background item.
+    ///   - after: commands run last, such as restarting the audio system.
+    /// - Returns: what was moved, or nil if the person cancelled or it failed (the banner then says why).
+    static func move(_ urls: [URL], before: [String] = [], after: [String] = [], prompt: String) -> [TrashRecord]? {
+        let trash = home.appendingPathComponent(".Trash")
+        var planned: [(URL, URL)] = []
+        var taken = Set<String>()
+        for url in urls {
+            var target = trash.appendingPathComponent(url.lastPathComponent)
+            var attempt = 1
+            while FileManager.default.fileExists(atPath: target.path) || taken.contains(target.path) {
+                let base = url.deletingPathExtension().lastPathComponent, ext = url.pathExtension
+                target = trash.appendingPathComponent("\(base) \(attempt)" + (ext.isEmpty ? "" : ".\(ext)"))
+                attempt += 1
+            }
+            taken.insert(target.path)
+            planned.append((url, target))
+        }
+        let moves = planned.map { source, target in
+            "mv -n \(Privileged.quoted(source.path)) \(Privileged.quoted(target.path)) && chown -R \(getuid()) \(Privileged.quoted(target.path))"
+        }
+        // Each step may fail on its own without stopping the rest; what actually moved is checked afterwards.
+        let command = (before + moves + after).map { "(\($0)) 2>/dev/null" }.joined(separator: "; ") + "; true"
+        if let problem = Privileged.run(command, prompt: prompt) {
+            if problem != "Cancelled." { Shared.shared.banner = .init(title: "Couldn't remove it", detail: problem) }
+            return nil
+        }
+        return planned.compactMap { source, target in
+            FileManager.default.fileExists(atPath: target.path) && !FileManager.default.fileExists(atPath: source.path)
+                ? TrashRecord(original: source.path, trashed: target.path, bytes: nil) : nil
+        }
+    }
+}
