@@ -48,14 +48,35 @@ struct SettingsView: View {
                     Button("Open Settings…") { Permissions.openFullDiskAccessSettings() }
                 }
             }
-            Section("Updates") {
+            Section {
                 Toggle("Check for updates automatically", isOn: $updates.automatic)
                 Button("Check Now") { updates.check() }
+            } header: {
+                Text("Updates")
+            } footer: {
+                // As in Strand and Dice: who makes it, which version this is, and where releases live.
+                HStack(alignment: .bottom) {
+                    Text("© \(String(Calendar.current.component(.year, from: Date()))) opyuii\nAll rights reserved.")
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("Version \(version) (\(build))").foregroundStyle(.secondary).textSelection(.enabled)
+                        HStack(spacing: 10) {
+                            Link("GitHub", destination: URL(string: "https://github.com/lumen-xx/spare-releases")!)
+                            Link("opyuii.com", destination: URL(string: "https://opyuii.com")!)
+                        }
+                    }
+                }
+                .font(.footnote)
+                .padding(.top, 14)
             }
         }
         .formStyle(.grouped)
         .scrollIndicators(.never)
     }
+
+    private var version: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development" }
+    private var build: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0" }
 
     private func add() {
         let panel = NSOpenPanel()
