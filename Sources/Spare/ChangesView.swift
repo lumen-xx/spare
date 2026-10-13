@@ -12,6 +12,9 @@ final class SystemChangesModel: ObservableObject {
     func startIfNeeded() { if !started { load() } }
 
     func load() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         started = true
         loading = true
         let fullDiskAccess = Shared.shared.fullDiskAccess

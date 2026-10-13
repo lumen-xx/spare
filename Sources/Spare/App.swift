@@ -25,6 +25,13 @@ enum Entry {
 struct SpareApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
+    init() {
+        #if DEBUG
+        // Sample data goes in before any window exists, so no page starts reading the Mac.
+        if Demo.isOn { MainActor.assumeIsolated { Demo.show() } }
+        #endif
+    }
+
     var body: some Scene {
         Window("Spare", id: "main") {
             ContentView()

@@ -2,6 +2,10 @@
 
 An honest Mac cleaner for Apple silicon, macOS 14 or newer. It shows what takes up space, says plainly what each thing is and what happens once it's gone, and moves only what you choose to the Trash.
 
+![Spare's Cleanup](docs/images/cleanup.png)
+
+Screenshots in docs/images are made from sample data: `swift build`, run `.build/debug/Spare -demo YES -section Cleanup -AppleLocale en_US`, capture the window, then `swift scripts/marketing.swift <window.png> <out.png> <headline> <subtitle> work/marketing/icon.png`.
+
 ## What it does
 
 Every topic has its own page in the sidebar.

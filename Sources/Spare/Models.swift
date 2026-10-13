@@ -51,7 +51,21 @@ final class Shared: ObservableObject {
 
     init() { refreshSpace() }
 
+    #if DEBUG
+    /// Sample numbers for marketing screenshots; the real disk is never read while it's on.
+    private var demo = false
+    func showDemo(space: Volume.Space) {
+        demo = true
+        self.space = space
+        fullDiskAccess = true
+        trashBytes = nil
+    }
+    #endif
+
     func refreshSpace() {
+        #if DEBUG
+        if demo { return }
+        #endif
         space = Volume.space()
         volumeName = (try? home.resourceValues(forKeys: [.volumeLocalizedNameKey]))?.volumeLocalizedName ?? "Macintosh HD"
         let access = Permissions.fullDiskAccess()
@@ -149,10 +163,25 @@ final class CleanupModel: ObservableObject {
 
     var isScanning: Bool { !pending.isEmpty }
 
+    #if DEBUG
+    func showDemo(_ demo: [Finding], expanded: Set<String>) {
+        started = true
+        cancel.cancel()
+        findings = Dictionary(uniqueKeysWithValues: demo.map { ($0.rule.id, $0) })
+        pending = []
+        selected = Set(demo.filter { $0.rule.safety != .review }.flatMap { $0.items.filter(\.suggested).map(\.id) })
+        self.expanded = expanded
+        scannedAt = Date()
+    }
+    #endif
+
     func startIfNeeded() { if !started { scan() } }
     func scanIfStarted() { if started { scan() } }
 
     func scan() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         started = true
         cancel.cancel()
         let token = Cancellation()
@@ -302,6 +331,9 @@ final class SpaceModel: ObservableObject {
     }
 
     private func load() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         cancel.cancel()
         let token = Cancellation()
         cancel = token
@@ -394,7 +426,20 @@ final class AppsModel: ObservableObject {
     func startIfNeeded() { if !started { load() } }
     func loadIfStarted() { if started { load() } }
 
+    #if DEBUG
+    func showDemo(_ demo: [InstalledApp], selected: String?) {
+        started = true
+        apps = demo
+        measured = Set(demo.map(\.id))
+        orphans = []
+        selection = selected
+    }
+    #endif
+
     func load() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         started = true
         loading = true
         let fullDiskAccess = Shared.shared.fullDiskAccess
@@ -424,6 +469,9 @@ final class AppsModel: ObservableObject {
     }
 
     func loadOrphans() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         orphansLoading = true
         let installed = Set(apps.map(\.bundleID))
         let names = apps.map(\.name)

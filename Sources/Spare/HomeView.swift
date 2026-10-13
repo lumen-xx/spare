@@ -12,6 +12,9 @@ final class HomeModel: ObservableObject {
     func startIfNeeded() { if !started { load() } }
 
     func load() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         started = true
         loading = true
         Task {

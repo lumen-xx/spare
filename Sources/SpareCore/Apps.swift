@@ -29,6 +29,7 @@ public struct Leftover: Identifiable, Sendable, Hashable {
     public let kind: String
     public var usage = Usage()
     public var id: String { url.path }
+    public init(url: URL, kind: String, usage: Usage = Usage()) { self.url = url; self.kind = kind; self.usage = usage }
 }
 
 /// Files in ~/Library named after an app that is no longer installed.

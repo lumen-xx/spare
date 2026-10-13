@@ -28,7 +28,19 @@ final class PackagesModel: ObservableObject {
 
     func startIfNeeded() { if !started { load() } }
 
+    #if DEBUG
+    func showDemo(_ demo: [PackageRow], managers: [Package.Manager], unused: [String]) {
+        started = true
+        rows = demo
+        self.managers = managers
+        self.unused = unused
+    }
+    #endif
+
     func load() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         started = true
         loading = true
         Task {

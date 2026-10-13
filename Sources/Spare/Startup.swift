@@ -78,7 +78,14 @@ final class StartupModel: ObservableObject {
 
     func startIfNeeded() { if !started { load() } }
 
+    #if DEBUG
+    func showDemo(_ demo: [StartupRow]) { started = true; rows = demo }
+    #endif
+
     func load() {
+        #if DEBUG
+        if Demo.isOn { return }
+        #endif
         started = true
         loading = true
         Task {

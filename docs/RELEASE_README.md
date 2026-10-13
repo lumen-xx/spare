@@ -2,6 +2,8 @@
 
 An honest Mac cleaner. It shows what takes up space, says plainly what each thing is and what happens once it's gone, and moves only what you choose to the Trash. Everything stays on your Mac.
 
+![Spare's Cleanup: what each thing is and what happens once it's gone](images/cleanup.png)
+
 ## Install
 
 macOS 14+ · Apple silicon
@@ -30,6 +32,12 @@ Every topic has its own page in the sidebar:
 - **History**: everything Spare moved to the Trash, with Put Back.
 
 Everything that is part of macOS is marked and locked. Nothing a running app has open is moved.
+
+![Uninstall an app with every file it keeps](images/apps.png)
+
+![Login and background items, with leftovers of removed apps marked](images/background.png)
+
+![Homebrew, npm and other packages, with what needs each one](images/packages.png)
 
 Spare never deletes anything itself, has no background process or menu bar icon, and never sends anything anywhere.
 
