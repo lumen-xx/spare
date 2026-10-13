@@ -58,7 +58,7 @@ final class Shared: ObservableObject {
         demo = true
         self.space = space
         fullDiskAccess = true
-        trashBytes = nil
+        trashBytes = 1_240_000_000
     }
     #endif
 

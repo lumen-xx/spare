@@ -242,12 +242,9 @@ struct DiskSummary: View {
                 .frame(height: 6)
                 Text("\(Bytes.text(space.free)) free of \(Bytes.text(space.total))")
                     .font(.system(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
-                if space.purgeable > 1_000_000_000 {
-                    Text("+ \(Bytes.text(space.purgeable)) macOS can clear itself")
-                        .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
-                        .help("Purgeable space: local Time Machine snapshots, iCloud files that are also online, and caches macOS manages. macOS removes them on its own when it needs room.")
-                }
+                // What macOS can clear by itself is on the Snapshots page; here only what's free.
                 if let trash = shared.trashBytes, trash > 0 {
+                    Divider().padding(.vertical, 2)
                     HStack {
                         Text("Trash: \(Bytes.text(trash))").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
                         Spacer()
