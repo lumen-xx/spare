@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="${SPARE_VERSION:-0.3.0}"
-BUILD="${SPARE_BUILD:-5}"
+VERSION="${SPARE_VERSION:-0.3.1}"
+BUILD="${SPARE_BUILD:-6}"
 APP="$(pwd)/dist/Spare.app"
 swift build -c release --arch arm64
 BIN_PATH="$(swift build -c release --arch arm64 --show-bin-path)"
