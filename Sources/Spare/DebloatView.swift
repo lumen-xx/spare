@@ -58,8 +58,11 @@ final class DebloatModel: ObservableObject {
             self.states = states
             self.profile = snapshot.profile
             self.models = models
-            self.apps = apps
-            self.blocks = Dictionary(uniqueKeysWithValues: apps.map { ($0.id, BuiltInApps.block(of: $0, disabled: snapshot.disabled)) })
+            let blocks = Dictionary(uniqueKeysWithValues: apps.map { ($0.id, BuiltInApps.block(of: $0, disabled: snapshot.disabled)) })
+            // Blocked apps first, so they're seen without scrolling. Only on loading: rows don't jump while clicking.
+            let kept = { (app: BuiltInApp) in blocks[app.id] != .open }
+            self.apps = apps.filter(kept) + apps.filter { !kept($0) }
+            self.blocks = blocks
             self.dock = snapshot.dock
             self.undoable = Debloat.undoable(apps: apps, disabled: snapshot.disabled)
             self.optional = optional.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -802,11 +805,16 @@ private struct BuiltInRow: View {
             Image(nsImage: AppLookup.icon(for: app.url, size: 24)).resizable().frame(width: 24, height: 24)
                 .opacity(block == .blocked ? 0.45 : 1).accessibilityHidden(true)
             Text(app.name).font(.spare(size: 12.5, weight: .medium))
-            if block == .blocked { Tag(text: "Blocked", tint: Ink.warm, symbol: "nosign") }
+                .foregroundStyle(block == .blocked ? .secondary : .primary)
             if block == .lapsed { Tag(text: "Opens again since an update", tint: .secondary).help("Block it again to keep it closed.") }
             Spacer(minLength: 12)
             if inDock {
                 Button("Remove from Dock") { model.toggleDock(app) }.spareButton(.quiet).controlSize(.small).disabled(model.step != nil)
+            }
+            // Where the eye goes down the list: blocked apps say so beside a filled Allow, open ones only offer Block.
+            if block == .blocked {
+                Label("Blocked", systemImage: "nosign")
+                    .font(.spare(size: 11.5, weight: .semibold)).foregroundStyle(Ink.warm)
             }
             Button(block == .blocked ? "Allow" : "Block") {
                 if block != .blocked && !NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID).isEmpty {
@@ -815,7 +823,7 @@ private struct BuiltInRow: View {
                     model.toggleBlock(app)
                 }
             }
-                .spareButton(.secondary).controlSize(.small)
+                .spareButton(block == .blocked ? .primary : .secondary).controlSize(.small)
                 .disabled(app.job == nil && block != .blocked)
                 .help(block == .blocked ? "Let \(app.name) open again" : "Keep \(app.name) from opening")
                 .frame(minWidth: 60, alignment: .trailing)
