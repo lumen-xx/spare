@@ -196,7 +196,7 @@ struct ChangesView: View {
                 if kind == .privacy && mine.contains(where: \.ownerGone) {
                     Toggle("Only apps that are gone", isOn: $onlyGone).toggleStyle(SpareCheckStyle()).fixedSize()
                 }
-                if let settings = settingsURL {
+                if let settings = settingsURL(chosen) {
                     Button("Open Settings…") { NSWorkspace.shared.open(settings) }.spareButton(.secondary).controlSize(.small)
                 }
             }
@@ -261,7 +261,7 @@ struct ChangesView: View {
         }
         .contextMenu(forSelectionType: SystemChange.ID.self) { ids in
             let rows = mine.filter { ids.contains($0.id) }
-            if let settings = settingsURL { Button("Open Settings…") { NSWorkspace.shared.open(settings) } }
+            if let settings = settingsURL(rows) { Button("Open Settings…") { NSWorkspace.shared.open(settings) } }
             if rows.contains(where: { $0.origin == .spare }) {
                 Button("Show in Spare") { Navigation.shared.page = .intelligence }
             }
@@ -305,7 +305,7 @@ struct ChangesView: View {
         case .printer: "Printers added to this Mac. Their drivers are under Drivers."
         case .vpn: "VPN configurations apps added. They go with their app, or in Network settings."
         case .profile: "Configuration profiles that change settings or allow management of this Mac. Spare's own can be removed here; others only in Settings."
-        case .privacy: "Permissions you gave or refused apps and tools: camera, microphone, screen recording, files and more. Deleting one means the app asks again next time. macOS's own aren't listed."
+        case .privacy: "Permissions you gave or refused apps and tools: camera, microphone, screen recording, files and more. Deleting one means the app asks again next time. Tools known only by their path that apply to every account can be removed only in System Settings."
         }
     }
 
@@ -317,6 +317,13 @@ struct ChangesView: View {
         case .profile: "No configuration profiles are installed."
         case .privacy: shared.fullDiskAccess ? "No permissions given to apps." : "Spare needs Full Disk Access to read these."
         }
+    }
+
+    /// The page for the chosen rows when they all belong on one, such as Full Disk Access; otherwise the kind's own.
+    private func settingsURL(_ rows: [SystemChange]) -> URL? {
+        let pages = Set(rows.compactMap { row -> String? in if case .settings(let page) = row.action { page } else { nil } })
+        if pages.count == 1, rows.allSatisfy({ !$0.removable }), let page = pages.first { return URL(string: page) }
+        return settingsURL
     }
 
     private var settingsURL: URL? {

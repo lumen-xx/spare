@@ -218,6 +218,15 @@ public enum SystemChanges {
         "kTCCServiceEndpointSecurityClient": "Endpoint security", "kTCCServiceWillow": "Home", "kTCCServiceMotion": "Motion & Fitness"
     ]
 
+    /// The page in Privacy & Security that lists a service's permissions.
+    public static func privacyPane(_ service: String) -> String {
+        let panes = ["kTCCServiceSystemPolicyAllFiles": "AllFiles", "kTCCServiceListenEvent": "ListenEvent", "kTCCServiceAccessibility": "Accessibility",
+                     "kTCCServicePostEvent": "Accessibility", "kTCCServiceScreenCapture": "ScreenCapture", "kTCCServiceCamera": "Camera",
+                     "kTCCServiceMicrophone": "Microphone", "kTCCServiceSystemPolicyAppBundles": "AppBundles", "kTCCServiceDeveloperTool": "DevTools",
+                     "kTCCServiceAppleEvents": "Automation", "kTCCServiceSystemPolicyAppData": "AppData", "kTCCServiceBluetoothAlways": "Bluetooth"]
+        return "x-apple.systempreferences:com.apple.preference.security?Privacy" + (panes[service].map { "_" + $0 } ?? "")
+    }
+
     /// Rows of `select service, client, client_type, auth_value, last_modified from access`, separated by "|".
     /// macOS's own clients are left out: their permissions come with the system.
     public static func privacy(_ rows: String, scope: String, appName: (String) -> String?, exists: (String) -> Bool) -> [SystemChange] {
@@ -232,12 +241,17 @@ public enum SystemChanges {
             let state = value == 2 ? "Allowed" : value == 3 ? "Limited" : value == 0 ? "Denied" : "Asked"
             let permission = services[service] ?? service.replacingOccurrences(of: "kTCCService", with: "")
             let modified = fields.count > 4 ? TimeInterval(fields[4]).map { Date(timeIntervalSince1970: $0) } : nil
+            // A program known by its path is removed from the database itself, as tccutil only takes bundle
+            // identifiers. The whole Mac's database is protected by System Integrity Protection, even from an
+            // administrator, so those are removed in System Settings, which may change it.
+            let onlyInSettings = byPath && scope == "system"
             return SystemChange(kind: .privacy, id: "privacy:\(scope):\(service):\(client)", name: owner ?? client,
-                                detail: [permission, byPath ? client : (owner == nil ? nil : client), modified.map { "decided " + Catalog.ago($0, from: Date()) }]
+                                detail: [permission, byPath ? client : (owner == nil ? nil : client), modified.map { "decided " + Catalog.ago($0, from: Date()) },
+                                         onlyInSettings ? "removed only in System Settings" : nil]
                                     .compactMap { $0 }.joined(separator: " · "),
                                 state: state, owner: owner, ownerGone: gone,
-                                // A program known by its path is removed from the database itself; tccutil only takes bundle identifiers.
-                                action: .resetPrivacy(service: service, client: client, systemWide: scope == "system"))
+                                action: onlyInSettings ? .settings(privacyPane(service))
+                                    : .resetPrivacy(service: service, client: client, systemWide: scope == "system"))
         }
     }
 }

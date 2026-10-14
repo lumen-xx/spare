@@ -368,6 +368,12 @@ check(privacy.count == 2 && privacy[0].ownerGone && privacy[0].state == "Allowed
       && privacy[1].removable && privacy[1].action == .resetPrivacy(service: "kTCCServiceAccessibility", client: "/usr/local/bin/gone", systemWide: false)
       && !privacy.contains { $0.name.contains("Safari") },
       "lists privacy permissions of apps that are gone, leaving macOS's own out")
+let wholeMac = SystemChanges.privacy("kTCCServiceSystemPolicyAllFiles|/Applications/Crab.app/Contents/MacOS/Crab|1|2|1\nkTCCServiceCamera|us.zoom.xos|0|2|1\n",
+                                     scope: "system", appName: { _ in "x" }, exists: { _ in true })
+check(wholeMac.count == 2 && !wholeMac[0].removable
+      && wholeMac[0].action == .settings("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+      && wholeMac[1].action == .resetPrivacy(service: "kTCCServiceCamera", client: "us.zoom.xos", systemWide: true),
+      "sends the whole Mac's permissions of programs known by path to System Settings, which alone may change them")
 
 // MARK: Home folder, toolchains, hand-installed tools
 
