@@ -9,6 +9,7 @@ struct Sidebar: View {
     /// Titles of folded sections, kept between launches; every section starts unfolded.
     @AppStorage("sidebarFoldedSections") private var foldedText = ""
     @FocusState private var focused: Bool
+    @State private var scrolled = false
     @Environment(\.reduceMotion) private var reduceMotion
 
     private var folded: Set<String> { Set(foldedText.split(separator: ",").map(String.init)) }
@@ -40,10 +41,12 @@ struct Sidebar: View {
                     .padding(.top, 4).padding(.bottom, 12)
                 }
                 .scrollIndicators(.never)
-                // Rows fade out under the title bar and above the disk rather than ending at a hard line.
+                // Rows fade out above the disk, and under the title bar once the list is scrolled, rather than
+                // ending at a hard line. At the top nothing fades, so the first page shows whole.
+                .modifier(ScrolledDown(scrolled: $scrolled))
                 .mask {
                     VStack(spacing: 0) {
-                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                        LinearGradient(colors: [scrolled ? .clear : .black, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
                         Rectangle()
                         LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 24)
                     }
@@ -131,6 +134,21 @@ struct Sidebar: View {
     private func badge(for page: Page) -> String? {
         guard page == .cleanup, !cleanup.isScanning, cleanup.scannedAt != nil, cleanup.foundBytes > 0 else { return nil }
         return Bytes.text(cleanup.foundBytes)
+    }
+}
+
+/// Whether a scroll view has moved down from its top. macOS 14 can't tell, and the list then never fades at the top.
+private struct ScrolledDown: ViewModifier {
+    @Binding var scrolled: Bool
+
+    func body(content: Content) -> some View {
+        if #available(macOS 15, *) {
+            content.onScrollGeometryChange(for: Bool.self) { $0.contentOffset.y + $0.contentInsets.top > 2 } action: { _, down in
+                scrolled = down
+            }
+        } else {
+            content
+        }
     }
 }
 
