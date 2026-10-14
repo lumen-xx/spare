@@ -31,6 +31,8 @@ enum Uninstaller {
             // In /Applications Spare may need a password to move itself; Finder asks for one as when dragging it.
             if case .failure(let error) = Privileged.finderTrash(app) { return error.localizedDescription }
         }
+        // Its helper, which would otherwise go on quitting apps without Spare.
+        QuitWatcher.stop()
         // Its own entries in Privacy & Security, so they don't stay behind for an app that's gone.
         _ = Shell.run("/usr/bin/tccutil", ["reset", "All", identifier], timeout: 10)
         UserDefaults.standard.removePersistentDomain(forName: identifier)

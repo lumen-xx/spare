@@ -11,6 +11,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 ditto Sources/Spare/Resources "$APP/Contents/Resources"
 cp "$BIN_PATH/Spare" "$APP/Contents/MacOS/Spare"
+cp "$BIN_PATH/SpareHelper" "$APP/Contents/MacOS/SpareHelper"
 ditto "$FRAMEWORK" "$APP/Contents/Frameworks/Sparkle.framework"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,6 +46,8 @@ fi
 # Sparkle keeps its upstream signatures, including its nested helpers. A stable identity keeps Full Disk Access
 # across updates; an ad-hoc signature changes with every build.
 SIGNING_KEYCHAIN="$(bash scripts/signing-identity.sh)"
+# The helper first, with its own identifier, then Spare around it.
+codesign --force --keychain "$SIGNING_KEYCHAIN" --sign "Spare Local Signing" --identifier com.opyuii.spare.helper "$APP/Contents/MacOS/SpareHelper"
 codesign --force --keychain "$SIGNING_KEYCHAIN" --sign "Spare Local Signing" "$APP"
 LEAF="$(codesign -d --requirements - "$APP" 2>&1 | sed -n 's/.*certificate leaf = H"\([0-9a-f]*\)".*/\1/p')"
 if [ -z "$LEAF" ]; then

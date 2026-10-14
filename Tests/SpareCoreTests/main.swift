@@ -1057,6 +1057,15 @@ if let tweak = Debloat.all.first(where: { $0.changes.contains { if case .pref = 
           "undoes only what Spare recorded changing, and never the Dock (\(undoable))")
     check(!Debloat.changedBySpare(tweak, journal: journal, read: { _, _ in nil }) || value.matches(nil),
           "leaves a setting the person changed back since")
+    if let keys = Debloat.all.first(where: { $0.id == "media-keys" }) {
+        var quitting = Debloat.Journal()
+        quitting.entries["quit:com.apple.Music"] = .init(previous: .quits(false), date: Date())
+        check(keys.changes == [.quit("com.apple.Music")] && !keys.inProfile, "keeps Music closed with the helper, not by switching off the play keys")
+        check(Debloat.changedBySpare(keys, journal: quitting, read: { _, _ in ["com.apple.Music"] })
+              && !Debloat.changedBySpare(keys, journal: quitting, read: { _, _ in nil }), "undoes the helper quitting Music only while it does")
+    } else {
+        check(false, "has the play keys setting")
+    }
     check(Debloat.Value.bool(true).matches("YES") && Debloat.Value.bool(false).matches("no") && !Debloat.Value.bool(true).matches("NO"),
           "reads `defaults write … YES` as on")
 } else {

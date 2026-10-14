@@ -64,7 +64,7 @@ Apple Intelligence's models download again by themselves once the profile is gon
 |---|---|
 | Apple Music in the Music app | Remove the “Spare Privacy” profile |
 | The Book Store | Remove the “Spare Privacy” profile |
-| Play keys opening Music | `launchctl enable gui/$(id -u)/com.apple.rcd`<br>then log out and back in |
+| Play keys opening Music | `defaults delete com.opyuii.spare quitWhenOpened`<br>`launchctl bootout gui/$(id -u)/com.opyuii.spare.helper`<br>`rm ~/Library/LaunchAgents/com.opyuii.spare.helper.plist`<br>Spare 0.5.0 and 0.5.1 switched the keys off instead: `launchctl enable gui/$(id -u)/com.apple.rcd` |
 
 ### Annoyances
 
@@ -120,6 +120,7 @@ By hand: quit Spare, undo what you want as above, then move these to the Trash:
 - `~/Library/Application Support/Spare`
 - `~/Library/Caches/com.opyuii.spare`
 - `~/Library/Preferences/com.opyuii.spare.plist`
+- `~/Library/LaunchAgents/com.opyuii.spare.helper.plist`, if Spare keeps Music closed; first run `launchctl bootout gui/$(id -u)/com.opyuii.spare.helper`
 - `~/Library/HTTPStorages/com.opyuii.spare`, `~/Library/WebKit/com.opyuii.spare` and `~/Library/Saved Application State/com.opyuii.spare.savedState`, if they're there
 
 Spare has no background process or login item, so nothing else is left running.

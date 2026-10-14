@@ -72,11 +72,13 @@ public enum Debloat {
         case pref(domain: String, key: String, Value)
         /// A launchd agent in the person's session, disabled and stopped.
         case service(String)
+        /// An app Spare's helper quits the moment it opens, by bundle identifier.
+        case quit(String)
 
         public var inProfile: Bool {
             switch self {
             case .restriction, .forced: true
-            case .pref, .service: false
+            case .pref, .service, .quit: false
             }
         }
 
@@ -87,6 +89,7 @@ public enum Debloat {
             case .forced(let domain, let key, let value): "Profile: \(domain) \(key) = \(value), locked"
             case .pref(let domain, let key, let value): "defaults write \(domain) \(key) \(value)"
             case .service(let label): "launchctl disable gui/$UID/\(label)"
+            case .quit(let id): "Spare's helper quits \(id) when it opens"
             }
         }
     }
@@ -240,9 +243,9 @@ public enum Debloat {
               detail: "The store inside Books. Your own books stay.",
               changes: [.restriction("allowBookstore")], since: 15),
         Tweak(id: "media-keys", group: .apps, title: "Play keys opening Music",
-              detail: "The service behind the play, pause and skip keys, which opens Music when nothing else plays.",
-              caveat: "The keys stop working in every app, Spotify included. Block Music below instead to keep them.",
-              changes: [.service("com.apple.rcd")]),
+              detail: "Switched off, Music quits whenever it opens, and the play, pause and skip keys keep working for Spotify, YouTube and every other player.",
+              caveat: "Music can't be used while this is off. A small Spare helper runs in the background to quit it.",
+              changes: [.quit("com.apple.Music")]),
 
         // Annoyances
         Tweak(id: "click-to-desktop", group: .annoyances, title: "Clicking the wallpaper hides every window",
@@ -294,7 +297,7 @@ public enum Debloat {
                 case .forced(let domain, let key, let value):
                     // Managed preferences call the global domain by its file's name.
                     forced[domain == "NSGlobalDomain" ? ".GlobalPreferences" : domain, default: [:]][key] = value.object
-                case .pref, .service:
+                case .pref, .service, .quit:
                     break
                 }
             }

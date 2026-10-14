@@ -66,6 +66,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { Updates.shared.start() }
+        // Spare's helper runs while it has apps to quit, from wherever Spare is now.
+        #if DEBUG
+        if !Demo.isOn { DispatchQueue.global(qos: .utility).async { QuitWatcher.check() } }
+        #else
+        DispatchQueue.global(qos: .utility).async { QuitWatcher.check() }
+        #endif
         #if DEBUG
         // Shows a sample problem, to check how messages look, offer their next step and stay.
         if UserDefaults.standard.bool(forKey: "previewBanner") {

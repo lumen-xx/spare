@@ -44,6 +44,8 @@ extension Debloat {
                 value.matches(Prefs.read(domain, key))
             case .service(let label):
                 disabled.contains(label)
+            case .quit(let id):
+                QuitWatcher.apps.contains(id)
             }
         }
 
@@ -54,7 +56,7 @@ extension Debloat {
             case .restriction(let key): return !ours && Prefs.isLocked("com.apple.applicationaccess", key)
             case .forced(let domain, let key, _): return !ours && Prefs.isLocked(domain, key)
             case .pref(let domain, let key, _): return Prefs.isLocked(domain, key)
-            case .service: return false
+            case .service, .quit: return false
             }
         }
     }
@@ -78,6 +80,8 @@ extension Debloat {
         public enum Previous: Codable, Sendable {
             case pref(Value?)
             case disabled(Bool)
+            /// Whether Spare's helper quit the app already.
+            case quits(Bool)
             /// Dock tiles taken out, as property lists, with where they were.
             case dock([DockTile])
         }
@@ -90,6 +94,7 @@ extension Debloat {
             case .forced(let domain, let key, _): "forced:\(domain):\(key)"
             case .pref(let domain, let key, _): "pref:\(domain):\(key)"
             case .service(let label): "service:\(label)"
+            case .quit(let id): "quit:\(id)"
             }
         }
 
@@ -143,6 +148,13 @@ extension Debloat {
                     journal.save()
                 }
                 if let problem = Launchd.disable(label) { problems.append("\(tweak.title): \(problem)") }
+            case .quit(let id):
+                let quits = QuitWatcher.apps.contains(id)
+                if journal.entries[key] == nil || !quits {
+                    journal.entries[key] = .init(previous: .quits(quits), date: Date())
+                    journal.save()
+                }
+                if let problem = QuitWatcher.set(id, quits: true) { problems.append("\(tweak.title): \(problem)") }
             }
         }
         return problems
@@ -169,6 +181,12 @@ extension Debloat {
                     continue
                 }
                 if let problem = Launchd.enable(label) { problems.append("\(tweak.title): \(problem)") } else { journal.entries[key] = nil }
+            case .quit(let id):
+                if case .quits(true)? = journal.entries[key]?.previous {
+                    journal.entries[key] = nil
+                    continue
+                }
+                if let problem = QuitWatcher.set(id, quits: false) { problems.append("\(tweak.title): \(problem)") } else { journal.entries[key] = nil }
             }
         }
         return problems
@@ -287,6 +305,7 @@ extension Debloat {
             switch change {
             case .pref(let domain, let name, let value): return value.matches(read(domain, name))
             case .service(let label): return disabled?.contains(label) ?? true
+            case .quit(let id): return (read(QuitWatcher.domain, QuitWatcher.key) as? [String])?.contains(id) == true
             case .restriction, .forced: return false
             }
         }
@@ -314,6 +333,19 @@ extension Debloat {
     /// allowed to open. Dock icons taken out stay out; each can be put back on Apple Apps. The profile is removed separately, as it needs a password.
     /// Returns problems, and the apps to restart so they notice.
     /// `tweaks` and `unblock` pick what to undo, by tweak id and app bundle identifier; nil undoes all of it.
+    /// Spare 0.5 switched the play keys off altogether to keep Music from opening. Now Music is quit instead, so the
+    /// keys work again: the service goes back on and the newer way takes its place.
+    public static func moveOnFromPlayKeysService() {
+        var journal = Journal.load()
+        let old = "service:com.apple.rcd"
+        guard let entry = journal.entries[old] else { return }
+        if case .disabled(true) = entry.previous {} else { _ = Launchd.enable("com.apple.rcd") }
+        journal.entries[old] = nil
+        journal.save()
+        if let tweak = all.first(where: { $0.id == "media-keys" }) { _ = apply(tweak, journal: &journal) }
+        journal.save()
+    }
+
     public static func undoLocal(apps: [BuiltInApp], tweaks chosen: Set<String>? = nil, unblock: Set<String>? = nil) -> (problems: [String], restart: Set<String>) {
         var journal = Journal.load()
         var problems: [String] = []

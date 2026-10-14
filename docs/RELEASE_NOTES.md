@@ -1,8 +1,5 @@
-# Spare 0.5.1
+# Spare 0.5.2
 
-- **Uninstall waits until Spare knows what it changed.** Opened straight from the Apps page, it could show “nothing to undo” and uninstall before the list was ready.
-- **Undo leaves your own choices alone.** It only offers changes of Spare's that are still in place. A setting you changed back yourself in System Settings stays as you set it.
-- **Deleting a privacy permission macOS refuses to change** now says so and tells you where to remove it, rather than only that it's still there.
-- Finder switches show the right state for settings once made with `defaults write … YES`, and update when you come back to Spare.
-- Removing an audio driver always asks first, as sound stops for a moment, calls too.
-- The sidebar no longer fades over the first page when you're at the top, and the arrow keys keep working after you fold the section you're in.
+- **Play keys without Music.** Switch off “Play keys opening Music” on Apple Apps and Music quits the moment anything opens it, with no “can't be opened” message. The play, pause and skip keys keep working for Spotify, YouTube and every other player. A small Spare helper runs in the background while this is off; Undo and Uninstall remove it.
+- If you switched the play keys off with 0.5.0 or 0.5.1, they work again, and Music is kept closed the new way.
+- The note under Apple's built-in apps says that opening a blocked app shows macOS's “can't be opened” message, and how to avoid it for Music.

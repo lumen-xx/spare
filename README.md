@@ -13,6 +13,8 @@ An honest Mac cleaner for Apple silicon, macOS 14 or newer. It shows what takes 
 
 macOS 14 or newer · Apple silicon
 
+There's no version for Intel Macs. Apple no longer makes them, and without one to test on, an Intel build would ship untested.
+
 1. [Download Spare](https://github.com/lumen-xx/spare/releases/latest), unzip it and move **Spare.app** to **Applications**.
 2. Open it. If macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Spare.app`. Spare is signed but not notarized yet.
 3. Optional: give it **Full Disk Access** so it can also look at Downloads, iPhone backups and other apps' data. Without it, Spare skips the folders macOS protects and says which.
@@ -47,7 +49,7 @@ Every topic has its own page in the sidebar.
 - **Browser Extensions**: extensions in every profile of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari, with the ones that can read and change every website marked. Spare only lists them, since removing one in its browser is what stops it syncing back.
 
 **Privacy & Debloat**
-- **Apple Intelligence**, **Data Sharing**, **Apple Apps** and **Annoyances**: switches for what macOS does, reviewed before anything changes. Settings only a profile can keep off go into one configuration profile, “Spare Privacy”, which you install in System Settings and Spare can remove again; the rest are written like any setting, with the value from before kept so undo puts back exactly that. Apple Intelligence's models are removed through macOS's asset service and kept from downloading again. Apple's built-in apps can't be deleted (they're on the sealed system volume), so Spare blocks them from opening until the next macOS update, and takes them out of the Dock. Nothing under /System changes and System Integrity Protection stays on. Every change can be undone, see [docs/UNDO.md](docs/UNDO.md).
+- **Apple Intelligence**, **Data Sharing**, **Apple Apps** and **Annoyances**: switches for what macOS does, reviewed before anything changes. Settings only a profile can keep off go into one configuration profile, “Spare Privacy”, which you install in System Settings and Spare can remove again; the rest are written like any setting, with the value from before kept so undo puts back exactly that. Apple Intelligence's models are removed through macOS's asset service and kept from downloading again. Apple's built-in apps can't be deleted (they're on the sealed system volume), so Spare blocks them from opening until the next macOS update, and takes them out of the Dock. Music can instead be kept closed without macOS's “can't be opened” message: a small helper quits it whenever it opens, so the play keys keep working for Spotify, YouTube and other players. Nothing under /System changes and System Integrity Protection stays on. Every change can be undone, see [docs/UNDO.md](docs/UNDO.md).
 
 **Startup**
 - **Login Items** and **Background Items**: tables with multiple selection. Launchd jobs can be turned off (`launchctl disable` + `bootout`), on, or removed; items apps register with macOS (from `sfltool dumpbtm`) link to Login Items settings; helper tools nothing starts are flagged.

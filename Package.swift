@@ -8,6 +8,8 @@ let package = Package(
     dependencies: [.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0")],
     targets: [
         .target(name: "SpareCore"),
+        // Quits the apps Spare keeps closed; built into Spare.app next to Spare itself.
+        .executableTarget(name: "SpareHelper"),
         .executableTarget(name: "Spare", dependencies: ["SpareCore", .product(name: "Sparkle", package: "Sparkle")],
             exclude: ["Resources"],
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]),

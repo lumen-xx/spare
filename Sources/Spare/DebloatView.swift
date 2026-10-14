@@ -46,6 +46,7 @@ final class DebloatModel: ObservableObject {
         let current = generation
         Task {
             async let read = background { () -> (Debloat.Snapshot, [String: Debloat.State]) in
+                Debloat.moveOnFromPlayKeysService()
                 let snapshot = Debloat.Snapshot.now()
                 return (snapshot, Dictionary(uniqueKeysWithValues: Debloat.all.map { ($0.id, snapshot.state($0)) }))
             }
@@ -732,7 +733,7 @@ struct DebloatView: View {
         case .intelligence, .sharing:
             "Settings marked with a lock go into one profile, “Spare Privacy”, which you approve in System Settings; macOS lets only a profile keep them switched off. Changing one later makes a new version that replaces the old one once you approve it. Nothing under /System changes, and System Integrity Protection stays on."
         case .apps:
-            "A block works through launchd, as macOS starts every app, and quits the app if it's open. It lasts until the next macOS update replaces the app."
+            "A block works through launchd, as macOS starts every app, and quits the app if it's open. It lasts until the next macOS update replaces the app. Opening a blocked app shows macOS's “can't be opened” message; to keep Music closed without it, switch off Play keys opening Music above."
         case .annoyances:
             "Spare keeps each setting's value from before, and puts exactly that back when you switch it on again."
         }
