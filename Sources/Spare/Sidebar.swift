@@ -40,9 +40,14 @@ struct Sidebar: View {
                     .padding(.top, 4).padding(.bottom, 12)
                 }
                 .scrollIndicators(.never)
-                // Rows fade out above the disk card rather than ending at a hard line.
-                .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.95), .init(color: .clear, location: 1)],
-                                     startPoint: .top, endPoint: .bottom))
+                // Rows fade out under the title bar and above the disk rather than ending at a hard line.
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                        Rectangle()
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 24)
+                    }
+                }
                 .onChange(of: navigation.page) { _, page in
                     unfold(sectionOf(page))
                     withAnimation(reduceMotion ? nil : Motion.settle) { scroller.scrollTo(page, anchor: nil) }

@@ -6,5 +6,5 @@
 - **Appearance**: Automatic, Light or Dark. And you can stop Spare asking before it moves things to the Trash.
 - **Privacy permissions of programs known only by their path** (applets, scripts, tools) can be deleted now, as can those of apps with spaces in their identifier. When something can't be deleted, the message has a Copy Error button.
 - Right-click any file, app or leftover for Show in Finder and Copy Path. Rows on Leftovers, an app's details and Purgeable Space are selected by clicking anywhere on them.
-- A cleaner sidebar: the main pages on top, then titled sections with a thin line along their pages. Sections fold away and stay that way; the disk sits across the bottom.
+- A cleaner sidebar: the main pages on top, then titled sections with a thin line along their pages. Sections fold away and stay that way; the list fades out at both ends, and the disk sits across the bottom.
 - The Apps page points Spare's own row to Uninstall in Settings.
