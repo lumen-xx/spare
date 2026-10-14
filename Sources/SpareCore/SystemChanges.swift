@@ -4,7 +4,7 @@ import Foundation
 /// configurations, configuration profiles, and privacy permissions given to apps.
 public struct SystemChange: Identifiable, Sendable, Hashable {
     public enum Kind: String, CaseIterable, Sendable {
-        case account = "Accounts", printer = "Printers", vpn = "VPN", profile = "Profiles", privacy = "Privacy"
+        case account = "Accounts", printer = "Printers", vpn = "VPN", profile = "Profiles", privacy = "Permissions"
     }
 
     /// What Spare can do about it.
@@ -16,6 +16,8 @@ public struct SystemChange: Identifiable, Sendable, Hashable {
         /// Remove a privacy decision from macOS's permission database: for the whole Mac (`systemWide`, needs an
         /// administrator) or this account. `client` is a bundle identifier.
         case resetPrivacy(service: String, client: String, systemWide: Bool)
+        /// Remove a configuration profile Spare installed (needs an administrator).
+        case removeProfile(String)
         /// Only System Settings can change it.
         case settings(String)
     }
@@ -140,10 +142,62 @@ public enum SystemChanges {
             guard let range = line.range(of: "profileIdentifier: ") else { return nil }
             let identifier = String(line[range.upperBound...]).trimmingCharacters(in: .whitespaces)
             let computer = line.contains("_computerlevel")
+            if identifier == Debloat.profileIdentifier {
+                return SystemChange(kind: .profile, id: "profile:" + identifier, name: "Spare Privacy",
+                                    detail: "Made by Spare. Keeps what you switched off under Privacy & Debloat switched off.",
+                                    state: "Installed", origin: .spare, action: .removeProfile(identifier))
+            }
             return SystemChange(kind: .profile, id: "profile:" + identifier, name: identifier,
                                 detail: computer ? "For the whole Mac" : "For your account",
                                 origin: identifier.hasPrefix("com.apple.") ? .apple : .thirdParty, action: .settings(profilesSettings))
         }
+    }
+
+    /// `system_profiler -xml SPConfigurationProfileDataType`, which lists profiles for the whole Mac as well as the
+    /// person's, without a password; `profiles list` shows only the person's unless run as root.
+    public static func profiles(systemProfiler data: Data) -> [SystemChange] {
+        guard let sections = (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [[String: Any]] else { return [] }
+        var rows: [SystemChange] = []
+        for section in sections {
+            for group in section["_items"] as? [[String: Any]] ?? [] {
+                let computer = (group["_name"] as? String)?.contains("device") == true
+                for profile in group["_items"] as? [[String: Any]] ?? [] {
+                    guard let identifier = profile["spconfigprofile_profile_identifier"] as? String else { continue }
+                    let name = profile["spconfigprofile_profile_name"] as? String ?? profile["_name"] as? String ?? identifier
+                    let installed = (profile["spconfigprofile_install_date"] as? String).flatMap(installDate)
+                    let when = installed.map { " · Installed " + $0.formatted(date: .abbreviated, time: .omitted) } ?? ""
+                    if identifier == Debloat.profileIdentifier {
+                        // Spare's marker payload lists what it locks: tweaks = "analytics,siri,…".
+                        let marker = (profile["_items"] as? [[String: Any]] ?? []).compactMap { $0["spconfigprofile_payload_data"] as? String }
+                            .first { $0.contains(Debloat.profileIdentifier) }
+                        let locked = marker.flatMap { text -> Int? in
+                            guard let start = text.range(of: "tweaks = \""), let end = text[start.upperBound...].firstIndex(of: "\"") else { return nil }
+                            return text[start.upperBound..<end].split(separator: ",").count
+                        }
+                        rows.append(SystemChange(kind: .profile, id: "profile:" + identifier, name: "Spare Privacy",
+                                                 detail: "Made by Spare to keep what you switched off under Privacy & Debloat off" + when,
+                                                 state: locked.map { "\($0) switched off" } ?? "Installed", origin: .spare, action: .removeProfile(identifier)))
+                        continue
+                    }
+                    let organization = profile["spconfigprofile_organization"] as? String
+                    let scope = computer ? "For the whole Mac" : "For your account"
+                    rows.append(SystemChange(kind: .profile, id: "profile:" + identifier, name: name,
+                                             detail: [organization, scope].compactMap { $0 }.joined(separator: " · ") + when,
+                                             state: (profile["spconfigprofile_verification_state"] as? String).map { $0 == "verified" ? "Verified" : "Unsigned" },
+                                             origin: identifier.hasPrefix("com.apple.") ? .apple : .thirdParty, action: .settings(profilesSettings)))
+                }
+            }
+        }
+        return rows
+    }
+
+    /// The date inside "Wednesday, 14. October 2026 at 01:53:35 CEST (2026-10-13 23:53:35 +0000)".
+    static func installDate(_ text: String) -> Date? {
+        guard let open = text.lastIndex(of: "("), let close = text.lastIndex(of: ")"), open < close else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss Z"
+        return formatter.date(from: String(text[text.index(after: open)..<close]))
     }
 
     // MARK: Privacy
@@ -182,9 +236,8 @@ public enum SystemChanges {
                                 detail: [permission, byPath ? client : (owner == nil ? nil : client), modified.map { "decided " + Catalog.ago($0, from: Date()) }]
                                     .compactMap { $0 }.joined(separator: " · "),
                                 state: state, owner: owner, ownerGone: gone,
-                                // tccutil only knows apps by bundle identifier; paths are removed in Privacy & Security settings.
-                                action: byPath ? .settings("x-apple.systempreferences:com.apple.preference.security?Privacy")
-                                    : .resetPrivacy(service: service, client: client, systemWide: scope == "system"))
+                                // A program known by its path is removed from the database itself; tccutil only takes bundle identifiers.
+                                action: .resetPrivacy(service: service, client: client, systemWide: scope == "system"))
         }
     }
 }

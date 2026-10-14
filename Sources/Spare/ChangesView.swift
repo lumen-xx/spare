@@ -38,7 +38,10 @@ final class SystemChangesModel: ObservableObject {
         rows += SystemChanges.printers(devices: Shell.run("/usr/bin/lpstat", ["-v"], timeout: 20).output,
                                        states: Shell.run("/usr/bin/lpstat", ["-p"], timeout: 20).output)
         rows += SystemChanges.vpns(Shell.run("/usr/sbin/scutil", ["--nc", "list"], timeout: 20).output) { AppLookup.name(for: $0) }
-        rows += SystemChanges.profiles(Shell.run("/usr/bin/profiles", ["list"], timeout: 20).output)
+        // The whole Mac's profiles and the person's, then any `profiles list` knows that the first missed.
+        let listed = SystemChanges.profiles(systemProfiler: Data(Shell.run("/usr/sbin/system_profiler", ["-xml", "SPConfigurationProfileDataType"], timeout: 30).output.utf8))
+        rows += listed
+        rows += SystemChanges.profiles(Shell.run("/usr/bin/profiles", ["list"], timeout: 20).output).filter { row in !listed.contains { $0.id == row.id } }
         // macOS keeps privacy decisions in two databases it guards; Spare can read them only with Full Disk Access.
         if fullDiskAccess {
             for (scope, database) in [("user", home.appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db").path),
@@ -52,6 +55,20 @@ final class SystemChangesModel: ObservableObject {
         return rows
     }
 
+    /// Whether an item is still on the Mac. An account or printer macOS can't answer for counts as still there.
+    nonisolated static func stillThere(_ item: SystemChange, rows: [SystemChange]) -> Bool {
+        switch item.action {
+        case .deleteAccount(let name):
+            let read = Shell.run("/usr/bin/dscl", [".", "-read", "/Users/\(name)", "UniqueID"], timeout: 10)
+            return read.status == 0 || !read.output.contains("eDSRecordNotFound")
+        case .deletePrinter(let queue):
+            let read = Shell.run("/usr/bin/lpstat", ["-p", queue], timeout: 10)
+            return read.status == 0 || !(read.output.contains("Invalid destination") || read.output.contains("not exist"))
+        default:
+            return rows.contains { $0.id == item.id }
+        }
+    }
+
     /// Deletes hidden accounts and printers and removes privacy decisions, with one administrator prompt for all that
     /// need one. None of this goes through the Trash. What counts as done is what's gone when Spare looks again.
     func apply(_ chosen: [SystemChange]) async {
@@ -60,44 +77,97 @@ final class SystemChangesModel: ObservableObject {
         working = true
         defer { working = false }
         var problems: [String] = []
-        var asAdministrator: [String] = []
-        var mine: [(service: String, client: String)] = [], everyone: [(service: String, client: String)] = []
+        // What ran and what came back, for Copy Error.
+        var log = ["Chosen: " + items.map(\.id).joined(separator: ", ")]
+        // What to run as root, each with the name its errors are reported under.
+        var asAdministrator: [(name: String, command: String)] = []
+        var mine: [PrivacyTool.Decision] = [], everyone: [PrivacyTool.Decision] = []
+        var accounts: [(title: String, name: String)] = []
         for item in items {
             switch item.action {
             case .deleteAccount(let name):
-                // The account, and the group of the same name installers create alongside it.
-                asAdministrator.append("dscl . -delete /Users/\(Privileged.quoted(name)); dscl . -delete /Groups/\(Privileged.quoted(name)) 2>/dev/null")
+                // In Spare itself, through macOS's identity API: Directory Services refuses a root shell.
+                accounts.append((item.name, name))
+            case .removeProfile(let identifier):
+                asAdministrator.append((item.name, Debloat.removeProfileCommand(identifier)))
             case .deletePrinter(let queue):
-                asAdministrator.append("lpadmin -x \(Privileged.quoted(queue))")
+                asAdministrator.append((item.name, "lpadmin -x \(Privileged.quoted(queue))"))
             case .resetPrivacy(let service, let client, let systemWide):
-                if systemWide { everyone.append((service, client)) } else { mine.append((service, client)) }
+                let decision = PrivacyTool.Decision(service: service, client: client,
+                                                    label: "\(item.name) (\(SystemChanges.services[service] ?? service.replacingOccurrences(of: "kTCCService", with: "")))")
+                if systemWide { everyone.append(decision) } else { mine.append(decision) }
             case .settings:
                 break
             }
         }
         if !mine.isEmpty {
-            let script = PrivacyTool.script(mine), timeout = 30 + 10 * Double(mine.count)
-            _ = await background { Shell.run("/bin/sh", ["-c", script], timeout: timeout) }
+            let database = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/com.apple.TCC/TCC.db").path
+            let script = PrivacyTool.script(mine, database: database), timeout = 30 + 10 * Double(mine.count)
+            let result = await background { Shell.run("/bin/sh", ["-c", script], timeout: timeout) }
+            log.append("Your own permissions, as \(NSUserName()) (exit \(result.status)):\n\(result.output.trimmingCharacters(in: .whitespacesAndNewlines))\n--- script ---\n\(script)")
+            problems += result.output.split(whereSeparator: \.isNewline).map(String.init).filter { $0.contains(": ") }
+        }
+        if !accounts.isEmpty {
+            let prompt = "Spare wants to delete \(accounts.count == 1 ? "a hidden account" : "\(accounts.count) hidden accounts")."
+            let asked = await background { LocalAccounts.ask(prompt: prompt) }
+            if let permission = asked.permission {
+                for account in accounts {
+                    let name = account.name
+                    if let problem = await background({ LocalAccounts.delete(name, permission: permission) }) {
+                        problems.append("\(account.title): \(problem)")
+                        log.append("Account \(name): \(problem)")
+                    }
+                }
+            } else if asked.problem == "Cancelled." {
+                if accounts.count == items.count { return }
+            } else if let problem = asked.problem {
+                problems.append(problem)
+            }
         }
         // Decisions for the whole Mac can only be removed as an administrator.
-        if !everyone.isEmpty { asAdministrator.append(PrivacyTool.script(everyone)) }
+        if !everyone.isEmpty {
+            // Each failure already names its app, so the part's own name stays out of the lines.
+            asAdministrator.append(("", PrivacyTool.script(everyone, database: "/Library/Application Support/com.apple.TCC/TCC.db")))
+        }
         if !asAdministrator.isEmpty {
-            let command = asAdministrator.map { "(\($0))" }.joined(separator: "; ")
-            if let problem = Privileged.run(command + "; true", prompt: "Spare wants to change \(asAdministrator.count == 1 ? "a setting" : "\(asAdministrator.count) settings") for every account.") {
-                if problem != "Cancelled." { problems.append(problem) }
-                else if asAdministrator.count == items.count { return }
+            // Each part runs whatever the others do; what a failing part says is printed under its name.
+            let command = asAdministrator.map { part in
+                "out=$( (\(part.command)) 2>&1 ) || printf '%s%s\\n' \(Privileged.quoted(part.name.isEmpty ? "" : part.name + ": ")) \"$out\""
+            }.joined(separator: "\n")
+            // A command the shell can't read would fail as a whole after the password, with nothing deleted.
+            let parsed = await background { Shell.run("/bin/sh", ["-n", "-c", command], timeout: 10) }
+            log.append("Shell check of the administrator command (exit \(parsed.status)): \(parsed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+            if parsed.status != 0 {
+                problems.append("Spare made a command macOS's shell can't read, so it didn't ask for your password: \(parsed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+            } else {
+                let result = Privileged.call(command, prompt: "Spare wants to change \(asAdministrator.count == 1 ? "a setting" : "\(asAdministrator.count) settings") for every account.", privileged: true)
+                log.append("As administrator: \(result.problem.map { "failed: " + $0 } ?? "finished")\n\((result.output ?? "").trimmingCharacters(in: .whitespacesAndNewlines))")
+                if let problem = result.problem {
+                    if problem != "Cancelled." { problems.append(problem) }
+                    else if mine.isEmpty && accounts.isEmpty { return }
+                }
+                problems += (result.output ?? "").split(whereSeparator: \.isNewline).map { String($0) }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             }
         }
         await reload()
-        let left = items.filter { item in rows.contains { $0.id == item.id } }
+        DebloatModel.shared.reloadIfStarted()
+        // Accounts and printers are asked about one by one, so a listing that failed never counts as deleted.
+        let rows = self.rows
+        let stayed = await background { items.filter { Self.stillThere($0, rows: rows) } }
+        let left = stayed
         let done = items.count - left.count
+        if !asAdministrator.isEmpty {
+            log.append("--- administrator command ---\n" + asAdministrator.map { part in "out=$( (\(part.command)) 2>&1 )" }.joined(separator: "\n"))
+        }
+        log.append("Still listed afterwards: " + (left.isEmpty ? "none" : left.map(\.id).joined(separator: ", ")))
         if !left.isEmpty, problems.isEmpty {
             problems = left.map { "\($0.name) is still there." }
         }
-        let verb = items.allSatisfy { if case .deletePrinter = $0.action { true } else { false } } ? "Removed" : "Deleted"
+        let verb = items.allSatisfy { switch $0.action { case .deletePrinter, .removeProfile: true; default: false } } ? "Removed" : "Deleted"
         Shared.shared.banner = .init(title: done == 0 ? "Nothing was \(verb.lowercased())" : done == 1 ? "\(verb) 1 item" : "\(verb) \(done) items",
-                                     detail: left.isEmpty ? nil : left.count == 1 ? "macOS kept 1 item." : "macOS kept \(left.count) items.",
-                                     problems: problems, failed: done == 0)
+                                     detail: left.isEmpty ? nil : problems.count == 1 ? problems[0] : left.count == 1 ? "macOS kept 1 item." : "macOS kept \(left.count) items.",
+                                     problems: problems.count == 1 ? [] : problems, failed: done == 0,
+                                     log: left.isEmpty ? nil : log.joined(separator: "\n\n"))
     }
 }
 
@@ -137,7 +207,7 @@ struct ChangesView: View {
                     .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 if model.working { ThinkingDots() }
-                if kind != .vpn && kind != .profile {
+                if kind != .vpn && (kind != .profile || mine.contains(where: \.removable)) {
                     Button(actionTitle + "…", role: .destructive) { confirming = true }
                         .spareButton(.secondary)
                         .disabled(!chosen.contains(where: \.removable) || model.working)
@@ -188,6 +258,9 @@ struct ChangesView: View {
         .contextMenu(forSelectionType: SystemChange.ID.self) { ids in
             let rows = mine.filter { ids.contains($0.id) }
             if let settings = settingsURL { Button("Open Settings…") { NSWorkspace.shared.open(settings) } }
+            if rows.contains(where: { $0.origin == .spare }) {
+                Button("Show in Spare") { Navigation.shared.page = .intelligence }
+            }
             Divider()
             Button(actionTitle + "…", role: .destructive) { selection = Set(ids); confirming = true }
                 .disabled(!rows.contains(where: \.removable))
@@ -201,13 +274,14 @@ struct ChangesView: View {
         }
     }
 
-    private var actionTitle: String { kind == .printer ? "Remove" : "Delete" }
+    private var actionTitle: String { kind == .printer || kind == .profile ? "Remove" : "Delete" }
 
     private var confirmTitle: String {
         let count = chosen.filter(\.removable).count
         switch kind {
         case .privacy: return count == 1 ? "Delete this permission?" : "Delete \(count) permissions?"
         case .account: return count == 1 ? "Delete this hidden account?" : "Delete \(count) hidden accounts?"
+        case .profile: return "Remove “Spare Privacy”?"
         default: return count == 1 ? "Remove this printer?" : "Remove \(count) printers?"
         }
     }
@@ -215,6 +289,7 @@ struct ChangesView: View {
     private var confirmMessage: String {
         switch kind {
         case .privacy: "macOS deletes these entries from its permission database. An app that's still installed asks again the next time it needs access. Entries for every account need an administrator password."
+        case .profile: "Everything it keeps switched off under Privacy & Debloat is as macOS has it again, and macOS may download Apple Intelligence's models again. macOS asks for an administrator password."
         case .account: "These accounts were created by installers to run their helpers; nobody logs in with them. This can't be undone from the Trash, and macOS asks for an administrator password."
         default: "You can add the printer again in Printers & Scanners settings. macOS asks for an administrator password."
         }
@@ -225,8 +300,8 @@ struct ChangesView: View {
         case .account: "Accounts on this Mac besides yours and macOS's own. Hidden accounts were made by installers to run their helpers."
         case .printer: "Printers added to this Mac. Their drivers are under Drivers."
         case .vpn: "VPN configurations apps added. They go with their app, or in Network settings."
-        case .profile: "Configuration profiles that change settings or allow management of this Mac."
-        case .privacy: "Permissions you gave apps: camera, microphone, screen recording, files and more. macOS's own aren't listed."
+        case .profile: "Configuration profiles that change settings or allow management of this Mac. Spare's own can be removed here; others only in Settings."
+        case .privacy: "Permissions you gave or refused apps and tools: camera, microphone, screen recording, files and more. Deleting one means the app asks again next time. macOS's own aren't listed."
         }
     }
 

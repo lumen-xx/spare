@@ -79,10 +79,31 @@ enum Privileged {
         event.setDescriptor(arguments, forKeyword: keyDirectObject)
         var error: NSDictionary?
         let result = runner.executeAppleEvent(event, error: &error)
-        guard let error else { return (result.stringValue, nil) }
-        // -128: the person cancelled.
-        if (error[NSAppleScript.errorNumber] as? Int) == -128 { return (nil, "Cancelled.") }
-        return (nil, error[NSAppleScript.errorMessage] as? String ?? "Unknown error.")
+        let answer: (output: String?, problem: String?)
+        if let error {
+            // -128: the person cancelled.
+            answer = (error[NSAppleScript.errorNumber] as? Int) == -128 ? (nil, "Cancelled.")
+                : (nil, error[NSAppleScript.errorMessage] as? String ?? "Unknown error.")
+        } else {
+            answer = (result.stringValue, nil)
+        }
+        log(command, answer)
+        return answer
+    }
+
+    /// With `defaults write com.opyuii.spare logAdministrator -bool YES`, every command and what came back is added to
+    /// ~/Library/Logs/Spare/administrator.log, for finding out why a change didn't happen.
+    private static func log(_ command: String, _ answer: (output: String?, problem: String?)) {
+        guard UserDefaults.standard.bool(forKey: "logAdministrator") else { return }
+        let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Spare")
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = folder.appendingPathComponent("administrator.log")
+        let entry = "--- \(Date())\n\(command)\n>>> output: \(answer.output ?? "(none)")\n>>> problem: \(answer.problem ?? "(none)")\n\n"
+        if let handle = try? FileHandle(forWritingTo: file) {
+            handle.seekToEndOfFile(); handle.write(Data(entry.utf8)); try? handle.close()
+        } else {
+            try? Data(entry.utf8).write(to: file)
+        }
     }
 
     /// Asks Finder to move an item to the Trash. Finder asks for a password when the item needs one, as when

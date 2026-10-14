@@ -348,11 +348,24 @@ let vpns = SystemChanges.vpns("Available network connection services in the curr
 check(vpns.first?.name == "Tailscale" && vpns.first?.state == "Connected" && vpns.first?.owner == "Tailscale" && vpns.first?.ownerGone == false, "reads VPN configurations and their app")
 check(SystemChanges.profiles("There are no configuration profiles installed for user 'lumen'").isEmpty
       && SystemChanges.profiles("_computerlevel[1] attribute: profileIdentifier: com.vendor.mdm\n").first?.detail == "For the whole Mac", "reads configuration profiles")
+
+let profilerXML: [[String: Any]] = [["_items": [["_name": "spconfigprofile_section_deviceconfigprofiles", "_items": [
+    ["_name": "Spare Privacy", "spconfigprofile_profile_identifier": "com.opyuii.spare.debloat",
+     "spconfigprofile_install_date": "Wednesday, 14. October 2026 at 01:53:35 CEST (2026-10-13 23:53:35 +0000)",
+     "_items": [["spconfigprofile_payload_data": "{ \"com.opyuii.spare.debloat\" = { tweaks = \"analytics,siri,genmoji\"; }; }"]]],
+    ["_name": "Wi-Fi", "spconfigprofile_profile_identifier": "com.school.wifi", "spconfigprofile_organization": "School",
+     "spconfigprofile_verification_state": "verified"]
+]]]]]
+let fromProfiler = SystemChanges.profiles(systemProfiler: (try? PropertyListSerialization.data(fromPropertyList: profilerXML, format: .xml, options: 0)) ?? Data())
+check(fromProfiler.count == 2 && fromProfiler[0].origin == .spare && fromProfiler[0].state == "3 switched off"
+      && fromProfiler[0].action == .removeProfile("com.opyuii.spare.debloat") && fromProfiler[0].removable
+      && fromProfiler[1].detail?.hasPrefix("School · For the whole Mac") == true && !fromProfiler[1].removable,
+      "lists the whole Mac's profiles, marks Spare's own as removable, and leaves others to Settings (\(fromProfiler.map(\.state)))")
 let privacy = SystemChanges.privacy("kTCCServiceCamera|us.zoom.xos|0|2|1700000000\nkTCCServiceMicrophone|com.apple.Safari|0|2|1\nkTCCServiceAccessibility|/usr/local/bin/gone|1|2|1\n",
                                     scope: "user", appName: { $0 == "us.zoom.xos" ? nil : "x" }, exists: { _ in false })
 check(privacy.count == 2 && privacy[0].ownerGone && privacy[0].state == "Allowed" && privacy[0].detail?.hasPrefix("Camera") == true
       && privacy[0].action == .resetPrivacy(service: "kTCCServiceCamera", client: "us.zoom.xos", systemWide: false)
-      && !privacy[1].removable
+      && privacy[1].removable && privacy[1].action == .resetPrivacy(service: "kTCCServiceAccessibility", client: "/usr/local/bin/gone", systemWide: false)
       && !privacy.contains { $0.name.contains("Safari") },
       "lists privacy permissions of apps that are gone, leaving macOS's own out")
 
@@ -985,6 +998,78 @@ check(mailCopies.count == 1 && mailCopies.first?.label == "2 attachments" && mai
 check(Set(Catalog.rules.map(\.id)).count == Catalog.rules.count, "every rule has its own identifier")
 check(Catalog.rules.filter { $0.safety == .review }.allSatisfy { $0.group == .review }, "everything that needs a decision sits under Your Call")
 check(Bytes.text(1_500_000_000).hasSuffix("GB") && Bytes.text(1_500_000_000).hasPrefix("1"), "writes sizes in the decimal units Finder uses")
+
+
+// MARK: Privacy and debloat
+
+check(Set(Debloat.all.map(\.id)).count == Debloat.all.count, "every privacy setting has its own identifier")
+check(Debloat.all.filter { $0.group == .intelligence }.allSatisfy(\.inProfile), "every Apple Intelligence switch is locked by the profile")
+check(Debloat.setsToRemove(off: ["writing-tools"]).isEmpty, "keeps the language models while other features still need them")
+let everyAI = Set(Debloat.all.filter { $0.group == .intelligence }.map(\.id))
+check(Set(Debloat.setsToRemove(off: everyAI)) == Set(Debloat.modelSets.map(\.name)), "removes every model set once every feature is off")
+check(Debloat.setsToRemove(off: ["photos-clean-up"]) == ["com.apple.MobileAsset.UAF.Photos.MagicCleanup"], "removes one feature's own models on their own")
+check(Debloat.Value.bool(true).matches(NSNumber(value: 1)) && !Debloat.Value.bool(true).matches(NSNumber(value: 0))
+      && Debloat.Value.int(2).matches(NSNumber(value: 2)) && !Debloat.Value.string("a").matches(nil),
+      "reads stored preferences as defaults writes them, booleans and 0 or 1 alike")
+if let data = try? Debloat.profile(["analytics", "writing-tools", "improve-siri", "photos-clean-up"]),
+   let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+   let parts = plist["PayloadContent"] as? [[String: Any]] {
+    let restrictions = parts.first { $0["PayloadType"] as? String == "com.apple.applicationaccess" }
+    let domains = parts.compactMap { ($0["PayloadContent"] as? [String: Any])?.keys.first }
+    let blocks = parts.compactMap { ($0["PayloadContent"] as? [String: Any])?["com.apple.MobileAsset"] as? [String: Any] }.first
+    let forced = ((blocks?["Forced"] as? [[String: Any]])?.first?["mcx_preference_settings"] as? [String: Any]) ?? [:]
+    check(restrictions?["allowDiagnosticSubmission"] as? Bool == false && restrictions?["allowWritingTools"] as? Bool == false
+          && restrictions?["allowGameCenter"] == nil,
+          "writes a restriction for each chosen setting and none for the others")
+    check(domains.contains("com.apple.assistant.support") && domains.contains(Debloat.profileIdentifier), "locks Siri's sharing and marks the profile as Spare's")
+    check(forced.keys.sorted() == ["DownloadServerBaseURLOverride-com.apple.MobileAsset.UAF.Photos.MagicCleanup"],
+          "keeps only the removed models from downloading again (\(forced.keys.sorted()))")
+    check(plist["PayloadIdentifier"] as? String == Debloat.profileIdentifier && (try? Debloat.profile(["analytics"])).flatMap {
+              (try? PropertyListSerialization.propertyList(from: $0, format: nil) as? [String: Any])?["PayloadUUID"] as? String
+          } == plist["PayloadUUID"] as? String,
+          "gives the profile the same identity every time, so a new one replaces the old")
+} else {
+    check(false, "writes the privacy profile as a property list")
+}
+let chess = BuiltInApp(url: URL(fileURLWithPath: "/System/Applications/Chess.app"), bundleID: "com.apple.Chess", name: "Chess",
+                       job: "application.com.apple.Chess.11.12")
+check(BuiltInApps.block(of: chess, disabled: ["application.com.apple.Chess.11.12"]) == .blocked
+      && BuiltInApps.block(of: chess, disabled: ["application.com.apple.Chess.9.10"]) == .lapsed
+      && BuiltInApps.block(of: chess, disabled: ["application.com.apple.Chessboard.11.12"]) == .open,
+      "tells a blocked app from one an update unblocked, and never mistakes another app for it")
+if let listed = BuiltInApps.list().first(where: { $0.bundleID == "com.apple.Chess" }) {
+    check(listed.job?.hasPrefix("application.com.apple.Chess.") == true && listed.job?.split(separator: ".").count == 6,
+          "names a built-in app's launch job by its file numbers (\(listed.job ?? "none"))")
+}
+check(!BuiltInApps.list().contains { $0.url.lastPathComponent == "System Settings.app" }, "never offers to block System Settings")
+
+// MARK: Undo everything
+
+if let tweak = Debloat.all.first(where: { $0.changes.contains { if case .pref = $0 { true } else { false } } }),
+   case .pref(let domain, let key, _)? = tweak.changes.first(where: { if case .pref = $0 { true } else { false } }) {
+    var journal = Debloat.Journal()
+    check(!Debloat.changedBySpare(tweak, journal: journal), "leaves a setting Spare never changed to the person")
+    journal.entries["pref:\(domain):\(key)"] = .init(previous: .pref(nil), date: Date())
+    journal.entries["dock:com.apple.Chess"] = .init(previous: .dock([]), date: Date())
+    let undoable = Debloat.undoable(apps: [], disabled: [], journal: journal)
+    check(Debloat.changedBySpare(tweak, journal: journal) && undoable.tweaks == [tweak.id] && undoable.blocked.isEmpty,
+          "undoes only what Spare recorded changing, and never the Dock (\(undoable))")
+} else {
+    check(false, "the catalog has a setting outside the profile")
+}
+
+// MARK: Finder
+
+let pathbar = FinderOptions.all.first { $0.id == "pathbar" }!
+let warning = FinderOptions.all.first { $0.id == "extension-warning" }!
+let scope = FinderOptions.all.first { $0.id == "search-here" }!
+check(!pathbar.isOn(nil) && pathbar.isOn(NSNumber(value: true)) && pathbar.value(on: false) == nil && pathbar.value(on: true) == .bool(true),
+      "shows the path bar only when switched on, and switching it off removes Spare's value")
+check(warning.isOn(nil) && !warning.isOn(NSNumber(value: false)) && warning.value(on: true) == nil && warning.value(on: false) == .bool(false),
+      "keeps a setting macOS has on unless switched off")
+check(!scope.isOn("SCev") && scope.isOn("SCcf") && scope.value(on: true) == .string("SCcf"),
+      "searches the folder you're in with Finder's own code for it")
+check(Set(FinderOptions.all.map(\.id)).count == FinderOptions.all.count, "gives every Finder setting its own name")
 
 print(failures == 0 ? "All checks passed." : "\(failures) checks failed.")
 exit(failures == 0 ? 0 : 1)

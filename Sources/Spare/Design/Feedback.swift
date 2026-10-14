@@ -8,8 +8,27 @@ enum Feel {
     static let hapticsKey = "softTaps"
     static let soundKey = "quietSound"
 
+    static let themeKey = "theme"
+
     static var haptics: Bool { UserDefaults.standard.object(forKey: hapticsKey) as? Bool ?? true }
     static var sound: Bool { UserDefaults.standard.bool(forKey: soundKey) }
+
+    /// Light or dark, or as the Mac is set.
+    enum Theme: String, CaseIterable {
+        case automatic, light, dark
+        var title: String { rawValue.capitalized }
+        var appearance: NSAppearance? {
+            switch self {
+            case .automatic: nil
+            case .light: NSAppearance(named: .aqua)
+            case .dark: NSAppearance(named: .darkAqua)
+            }
+        }
+    }
+
+    static var theme: Theme { Theme(rawValue: UserDefaults.standard.string(forKey: themeKey) ?? "") ?? .automatic }
+
+    @MainActor static func applyTheme() { NSApp.appearance = theme.appearance }
 }
 
 /// Acknowledging what just happened, the same way everywhere.

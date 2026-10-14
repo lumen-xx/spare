@@ -391,6 +391,8 @@ struct MacDownloadsView: View {
                                 bytes: leftovers.bytes) {
                         RevealButton(url: UpdateLeftovers.folder)
                     }
+                    .contentShape(Rectangle())
+                    .fileMenu([UpdateLeftovers.folder])
                     RowDivider().padding(.leading, 56).padding(.trailing, 14)
                 }
                 DownloadRow(symbol: "arrow.down.app", tint: (model.unused ?? 0) > 0 ? Ink.sea : .secondary,
@@ -469,23 +471,19 @@ struct MacDownloadsView: View {
         return text
     }
 
+    /// Switching off goes through the Apple Intelligence page's profile, which leaves Siri's language alone. Switch On
+    /// stays for Macs where an earlier Spare switched it off through Siri's language, to put that back.
     @ViewBuilder private var intelligenceAction: some View {
         if let status = model.status, model.switching == nil {
             switch status.state {
-            case .on:
-                Button("Switch Off…") { model.asking = .off }
-                    .spareButton(.secondary).controlSize(.small)
-                    .disabled(model.offLanguage == nil || model.freeing)
-                    .help(model.offLanguage == nil ? "Siri speaks no language but your Mac's, so Spare can't switch Apple Intelligence off."
-                                                   : "Switch Apple Intelligence off, so macOS removes its models")
-            case .releasing:
-                Button("Remove Models…") { model.asking = .release }
-                    .spareButton(.secondary).controlSize(.small)
-                    .disabled(model.freeing)
             case .off where status.savedBySpare:
                 Button("Switch On…") { model.asking = .on }
                     .spareButton(.secondary).controlSize(.small)
                     .disabled(model.freeing)
+            case .on, .releasing:
+                Button("Switch Off…") { Navigation.shared.page = .intelligence }
+                    .spareButton(.secondary).controlSize(.small)
+                    .help("Choose which Apple Intelligence features to switch off, and remove their models")
             default:
                 EmptyView()
             }
@@ -509,6 +507,8 @@ struct MacDownloadsView: View {
                             Button("Software Update") { NSWorkspace.shared.open(url) }.spareButton(.secondary).controlSize(.small)
                         }
                     }
+                    .contentShape(Rectangle())
+                    .fileMenu([UpdateLeftovers.folder])
                     if !assets.isEmpty { RowDivider().padding(.leading, 56).padding(.trailing, 14) }
                 }
                 if assets.isEmpty && waiting == nil {
@@ -528,6 +528,8 @@ struct MacDownloadsView: View {
                         }
                     }
                     .help(folderNames(asset.folders))
+                    .contentShape(Rectangle())
+                    .fileMenu(asset.folders)
                 }
             }
         }

@@ -102,7 +102,9 @@ struct HomeView: View {
                     .font(.spare(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
                 Spacer()
                 if model.working { ThinkingDots() }
-                Button("Move to Trash…", role: .destructive) { confirming = true }
+                Button(Ask.trashTitle, role: .destructive) {
+                    if Ask.beforeTrash { confirming = true } else { let items = chosen; Task { await model.remove(items) } }
+                }
                     .spareButton(.secondary)
                     .disabled(!chosen.contains { $0.origin.removable } || model.working)
             }
@@ -158,7 +160,10 @@ struct HomeView: View {
             let items = mine.filter { ids.contains($0.id) }
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting(items.map(\.url)) }
             Divider()
-            Button("Move to Trash…", role: .destructive) { selection = Set(ids); confirming = true }
+            Button(Ask.trashTitle, role: .destructive) {
+                selection = Set(ids)
+                if Ask.beforeTrash { confirming = true } else { Task { await model.remove(items) } }
+            }
                 .disabled(!items.contains { $0.origin.removable })
         } primaryAction: { ids in
             NSWorkspace.shared.activateFileViewerSelecting(mine.filter { ids.contains($0.id) }.map(\.url))

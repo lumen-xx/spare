@@ -59,6 +59,11 @@ struct SpareApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// The theme is set before the window shows, so it never flashes the other one.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        MainActor.assumeIsolated { Feel.applyTheme() }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { Updates.shared.start() }
         #if DEBUG
@@ -93,7 +98,8 @@ enum Page: String, CaseIterable, Identifiable {
     case loginItems = "Login Items", background = "Background Items"
     case systemExtensions = "System Extensions", drivers = "Drivers", plugIns = "Plug-ins", fonts = "Fonts", inputMethods = "Input Methods"
     case installerPackages = "Installer Packages", searchPaths = "Search Paths"
-    case accounts = "Accounts", printers = "Printers", vpn = "VPN", profiles = "Profiles", privacy = "Privacy"
+    case intelligence = "Apple Intelligence", sharing = "Data Sharing", appleApps = "Apple Apps", annoyances = "Annoyances"
+    case accounts = "Accounts", printers = "Printers", vpn = "VPN", profiles = "Profiles", privacy = "Permissions"
     case hiddenItems = "Hidden Items", sharedFolder = "Shared Folder"
     case history = "History", settings = "Settings"
 
@@ -102,7 +108,7 @@ enum Page: String, CaseIterable, Identifiable {
         switch self {
         case .cleanup: "sparkles"
         case .space: "chart.bar.doc.horizontal"
-        case .purgeable: "externaldrive.badge.timemachine"
+        case .purgeable: "arrow.triangle.2.circlepath"
         case .macOSDownloads: "arrow.down.app"
         case .cloudDownloads: "icloud.and.arrow.down"
         case .apps: "app.dashed"
@@ -121,12 +127,16 @@ enum Page: String, CaseIterable, Identifiable {
         case .fonts: "textformat"
         case .inputMethods: "keyboard"
         case .installerPackages: "archivebox"
-        case .searchPaths: "point.topleft.down.to.point.bottomright.curvepath"
+        case .searchPaths: "signpost.right"
+        case .intelligence: "apple.intelligence"
+        case .sharing: "hand.raised"
+        case .appleApps: "square.grid.2x2"
+        case .annoyances: "bell.slash"
         case .accounts: "person.2"
         case .printers: "printer"
-        case .vpn: "network.badge.shield.half.filled"
+        case .vpn: "network"
         case .profiles: "checkmark.shield"
-        case .privacy: "hand.raised"
+        case .privacy: "lock.shield"
         case .hiddenItems: "eye.slash"
         case .sharedFolder: "folder.badge.person.crop"
         case .history: "clock.arrow.circlepath"
@@ -137,6 +147,7 @@ enum Page: String, CaseIterable, Identifiable {
     static let sections: [(String, [Page])] = [
         ("Free Up Space", [.cleanup, .space, .purgeable, .macOSDownloads, .cloudDownloads]),
         ("Apps & Software", [.apps, .leftovers, .packages, .toolchains, .commandLineTools, .simulators, .docker, .browserExtensions]),
+        ("Privacy & Debloat", [.intelligence, .sharing, .appleApps, .annoyances]),
         ("Startup", [.loginItems, .background]),
         ("System Additions", [.systemExtensions, .drivers, .plugIns, .fonts, .inputMethods, .installerPackages, .searchPaths]),
         ("System Changes", [.accounts, .printers, .vpn, .profiles, .privacy]),
@@ -167,6 +178,13 @@ final class Navigation: ObservableObject {
     @Published var page = Page(rawValue: UserDefaults.standard.string(forKey: "section") ?? "") ?? .cleanup {
         didSet { UserDefaults.standard.set(page.rawValue, forKey: "section") }
     }
+    /// Settings opens its Uninstall question when it next shows: Spare's own row on Apps sends people there.
+    #if DEBUG
+    /// `-askToUninstall YES` opens the list on Settings for screenshots; nothing is undone or moved until a button is pressed.
+    @Published var askToUninstall = UserDefaults.standard.bool(forKey: "askToUninstall")
+    #else
+    @Published var askToUninstall = false
+    #endif
 }
 
 struct ContentView: View {
@@ -188,20 +206,8 @@ struct ContentView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: Binding(get: { navigation.page }, set: { if let value = $0 { navigation.page = value } })) {
-                ForEach(Page.sections, id: \.0) { title, pages in
-                    Section(title) { ForEach(pages) { row($0) } }
-                }
-                Section { row(.history); row(.settings) }
-            }
-            .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 290)
-            .scrollIndicators(.never)
-            // With many pages the list scrolls; the disk summary keeps its own backing so rows don't show through it.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                DiskSummary().padding(14).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.bar)
-                    .overlay(alignment: .top) { RowDivider() }
-            }
+            Sidebar()
+                .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 290)
         } detail: {
             Group {
                 switch navigation.page {
@@ -222,6 +228,10 @@ struct ContentView: View {
                 case .background: StartupView(part: .background)
                 case .systemExtensions, .drivers, .plugIns, .fonts, .inputMethods, .installerPackages, .searchPaths:
                     ExtensionsView(page: navigation.page).id(navigation.page)
+                case .intelligence: DebloatView(group: .intelligence).id(navigation.page)
+                case .sharing: DebloatView(group: .sharing).id(navigation.page)
+                case .appleApps: DebloatView(group: .apps).id(navigation.page)
+                case .annoyances: DebloatView(group: .annoyances).id(navigation.page)
                 case .accounts: ChangesView(kind: .account).id(navigation.page)
                 case .printers: ChangesView(kind: .printer).id(navigation.page)
                 case .vpn: ChangesView(kind: .vpn).id(navigation.page)
@@ -255,17 +265,6 @@ struct ContentView: View {
         .tint(tint.color)
         .environment(\.tintText, tint.text)
         .environment(\.reduceMotion, reduceMotion)
-    }
-
-    private func row(_ page: Page) -> some View {
-        Label(page.rawValue, systemImage: page.symbol)
-            .badge(badge(for: page))
-            .tag(page)
-    }
-
-    private func badge(for page: Page) -> Text? {
-        guard page == .cleanup, !cleanup.isScanning, cleanup.scannedAt != nil, cleanup.foundBytes > 0 else { return nil }
-        return Text(Bytes.text(cleanup.foundBytes))
     }
 }
 

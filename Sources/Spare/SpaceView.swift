@@ -110,7 +110,9 @@ struct SpaceView: View {
             NSPasteboard.general.setString(entry.url.path, forType: .string)
         }
         Divider()
-        Button("Move to Trash…", role: .destructive) { confirming = entry }
+        Button(Ask.trashTitle, role: .destructive) {
+            if Ask.beforeTrash { confirming = entry } else { Task { await model.moveToTrash(entry) } }
+        }
             .disabled(entry.locked)
     }
 }

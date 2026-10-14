@@ -14,6 +14,9 @@ public struct InstalledApp: Identifiable, Sendable {
     public var size = Usage()
     public var leftovers: [Leftover] = []
     public var id: String { url.path }
+    /// Apple's own apps stay, except the optional ones from the App Store, such as GarageBand, iMovie and Pages, which
+    /// reinstall free from there.
+    public var removable: Bool { !isApple || fromAppStore }
 
     public init(url: URL, bundleID: String, name: String, version: String?, isApple: Bool, fromAppStore: Bool, lastUsed: Date? = nil) {
         self.url = url; self.bundleID = bundleID; self.name = name; self.version = version

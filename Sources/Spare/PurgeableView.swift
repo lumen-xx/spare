@@ -343,9 +343,7 @@ private struct SnapshotRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            CheckBox(state: model.selected.contains(snapshot.id) ? .on : .off) {
-                if model.selected.contains(snapshot.id) { model.selected.remove(snapshot.id) } else { model.selected.insert(snapshot.id) }
-            }
+            CheckBox(state: model.selected.contains(snapshot.id) ? .on : .off) { toggle() }
             .accessibilityLabel(snapshot.date.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? snapshot.name)
             VStack(alignment: .leading, spacing: 1) {
                 Text(snapshot.date.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? snapshot.name).font(.spare(size: 12.5, weight: .medium))
@@ -361,5 +359,11 @@ private struct SnapshotRow: View {
                                         : "Neither Time Machine nor APFS reports a size per snapshot. Their total is part of Time Machine snapshots above.")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+    }
+
+    private func toggle() {
+        if model.selected.contains(snapshot.id) { model.selected.remove(snapshot.id) } else { model.selected.insert(snapshot.id) }
     }
 }

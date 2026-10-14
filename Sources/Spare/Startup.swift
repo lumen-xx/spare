@@ -416,6 +416,9 @@ struct OriginBadge: View {
                 .help("Made by Apple and added later. It can be removed.")
         case .thirdParty:
             EmptyView()
+        case .spare:
+            Tag(text: "Spare", tint: Ink.sea, symbol: "checkmark.shield.fill")
+                .help("Made by Spare under Privacy & Debloat. Removing it switches those settings back on.")
         }
     }
 }

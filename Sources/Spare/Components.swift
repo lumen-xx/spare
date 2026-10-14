@@ -47,6 +47,38 @@ struct SizeText: View {
     }
 }
 
+/// Whether Spare asks before moving things to the Trash. History can put them back either way, so people who
+/// know that can switch the question off in Settings; what can't be put back is always asked about.
+enum Ask {
+    static let key = "askBeforeTrash"
+    static var beforeTrash: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    /// "Move to Trash…" while it asks, "Move to Trash" once it doesn't.
+    static var trashTitle: String { beforeTrash ? "Move to Trash…" : "Move to Trash" }
+}
+
+/// The right-click menu for anything that's files or folders: Show in Finder, Open for an app, Copy Path.
+struct FileMenuItems: View {
+    let urls: [URL]
+
+    var body: some View {
+        if !urls.isEmpty {
+            Button(urls.count == 1 ? "Show in Finder" : "Show \(urls.count) Items in Finder") { NSWorkspace.shared.activateFileViewerSelecting(urls) }
+            if urls.count == 1, urls[0].pathExtension == "app" {
+                Button("Open") { NSWorkspace.shared.open(urls[0]) }
+            }
+            Button(urls.count == 1 ? "Copy Path" : "Copy Paths") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(urls.map(\.path).joined(separator: "\n"), forType: .string)
+            }
+        }
+    }
+}
+
+extension View {
+    /// Adds the file menu on right-click.
+    func fileMenu(_ urls: [URL]) -> some View { contextMenu { FileMenuItems(urls: urls) } }
+}
+
 struct RevealButton: View {
     let url: URL
     var body: some View {
@@ -210,6 +242,7 @@ struct BannerView: View {
     @ObservedObject var shared = Shared.shared
     @State private var showingProblems = false
     @State private var hovering = false
+    @State private var copied = false
     @Environment(\.reduceMotion) private var reduceMotion
 
     var body: some View {
@@ -221,7 +254,7 @@ struct BannerView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(banner.title).font(.spare(size: 13, weight: .semibold))
                     if let detail = banner.detail {
-                        Text(detail).font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(3)
+                        Text(detail).font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
                     }
                 }
                 Spacer(minLength: 12)
@@ -235,6 +268,15 @@ struct BannerView: View {
                                 }
                                 .padding(14).frame(maxWidth: 420)
                             }
+                    }
+                    if warning {
+                        Button(copied ? "Copied" : "Copy Error") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(banner.report, forType: .string)
+                            copied = true
+                        }
+                        .spareButton(.quiet)
+                        .help("Copies the message, every problem and what Spare ran, for a bug report")
                     }
                     if let session = banner.session {
                         Button("Undo") { HistoryModel.shared.putBack(session: session) }.spareButton(.secondary)
@@ -266,6 +308,7 @@ struct BannerView: View {
             .onHover { hovering = $0 }
             .accessibilityElement(children: .contain)
             .task(id: banner.id) {
+                copied = false
                 Feedback.announce([banner.title, banner.detail].compactMap { $0 }.joined(separator: ". "))
                 // The tap and the sound land with the tick, after the breath and the circle.
                 try? await Task.sleep(nanoseconds: 420_000_000)

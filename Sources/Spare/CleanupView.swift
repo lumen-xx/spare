@@ -62,8 +62,10 @@ struct CleanupView: View {
             }
             .accessibilityElement(children: .combine)
             Spacer()
-            Button { confirming = true } label: {
-                Label("Move to Trash…", systemImage: "trash").padding(.horizontal, 2)
+            Button {
+                if Ask.beforeTrash { confirming = true } else { Task { await model.moveSelectedToTrash() } }
+            } label: {
+                Label(Ask.trashTitle, systemImage: "trash").padding(.horizontal, 2)
             }
             .spareButton(.primary)
             .controlSize(.large)
@@ -244,6 +246,7 @@ struct ItemRow: View {
         .hoverWash(radius: 7)
         .hoverLag($hovering)
         .onTapGesture { model.toggle(item) }
+        .fileMenu(item.urls)
         .padding(.horizontal, -6)
         .help(item.urls.count == 1 ? item.urls[0].path : "\(item.urls.count) files in \(item.urls[0].deletingLastPathComponent().path)")
     }

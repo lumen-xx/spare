@@ -252,7 +252,12 @@ struct ExtensionsView: View {
                 Button("Open Login Items & Extensions Settings…") { Permissions.openLoginItemsSettings() }
             }
             Divider()
-            Button("Move to Trash…", role: .destructive) { selection = Set(ids); confirming = true }
+            // Forgetting an installer receipt can't be put back, so that's always asked.
+            Button(rows.contains { $0.item.category == .receipts } ? "Move to Trash…" : Ask.trashTitle, role: .destructive) {
+                selection = Set(ids)
+                if Ask.beforeTrash || rows.contains(where: { $0.item.category == .receipts }) { confirming = true }
+                else { Task { await model.remove(rows) } }
+            }
                 .disabled(!rows.contains(where: \.item.removable))
         } primaryAction: { ids in
             NSWorkspace.shared.activateFileViewerSelecting(model.rows.filter { ids.contains($0.id) }.compactMap(\.item.url))
@@ -311,7 +316,10 @@ struct ExtensionsView: View {
             if removable.isEmpty, let owner = chosen.first(where: { $0.item.ownerURL != nil })?.item, let url = owner.ownerURL {
                 Button("Uninstall \(owner.owner ?? "the App")…") { ExtensionsView.uninstall(app: url) }.spareButton(.secondary)
             } else {
-                Button(chosen.contains { $0.item.category == .receipts } ? "Remove…" : "Move to Trash…", role: .destructive) { confirming = true }
+                Button(chosen.contains { $0.item.category == .receipts } ? "Remove…" : Ask.trashTitle, role: .destructive) {
+                    if Ask.beforeTrash || chosen.contains(where: { $0.item.category == .receipts }) { confirming = true }
+                    else { let rows = chosen; Task { await model.remove(rows) } }
+                }
                     .spareButton(.secondary)
                     .disabled(removable.isEmpty || model.working)
             }

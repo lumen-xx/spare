@@ -49,7 +49,7 @@ struct AppsView: View {
                 .arrives(0)
                 TableCard {
                     List(selection: $model.selection) {
-                        ForEach(visible) { app in AppRow(app: app, measured: model.measured.contains(app.id)).tag(app.id) }
+                        ForEach(visible) { app in AppRow(app: app, measured: model.measured.contains(app.id)).tag(app.id).fileMenu([app.url]) }
                     }
                     .listStyle(.inset)
                     .overlay {
@@ -136,12 +136,35 @@ struct AppDetail: View {
                 fact("Last opened", app.lastUsed?.ago ?? "Not recorded")
             }
             .arrives(1)
-            if app.isApple {
-                Label("Comes with macOS or from Apple. Spare leaves it alone.", systemImage: "apple.logo")
+            if !app.removable {
+                Label("Comes with macOS. Spare leaves it alone.", systemImage: "apple.logo")
                     .font(.spare(size: 12.5)).foregroundStyle(.secondary)
                     .arrives(2)
+            } else if app.bundleID == Uninstaller.identifier {
+                // Spare can't take itself out like any app: it offers to undo its changes first, in Settings.
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("This is Spare. Uninstall it in Settings, where it first offers to undo what it changed on this Mac.", systemImage: "gearshape")
+                        .font(.spare(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Spacer()
+                        Button {
+                            Navigation.shared.askToUninstall = true
+                            Navigation.shared.page = .settings
+                        } label: {
+                            Label("Uninstall in Settings…", systemImage: "arrow.right.circle")
+                        }
+                        .spareButton(.secondary)
+                        .controlSize(.large)
+                    }
+                }
+                .arrives(2)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
+                    if app.isApple {
+                        Label("One of Apple's optional apps. It reinstalls free from the App Store.", systemImage: "apple.logo")
+                            .font(.spare(size: 12.5)).foregroundStyle(.secondary)
+                            .padding(.bottom, 4)
+                    }
                     SectionHeading(title: "Goes to the Trash")
                     Card {
                         row(url: app.url, kind: "The app", bytes: app.size.bytes, state: .on, toggle: nil)
@@ -161,7 +184,10 @@ struct AppDetail: View {
                 .arrives(2)
                 HStack {
                     Spacer()
-                    Button(role: .destructive) { confirming = true } label: {
+                    Button(role: .destructive) {
+                        // An open app is quit first, which can lose unsaved work, so that's always asked.
+                        if Ask.beforeTrash || isOpen { confirming = true } else { Task { await model.uninstall(app) } }
+                    } label: {
                         Label("Uninstall \(app.name)…", systemImage: "trash")
                     }
                     .spareButton(.secondary)
@@ -209,6 +235,10 @@ struct AppDetail: View {
             RevealButton(url: url)
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+        .contentShape(Rectangle())
+        // The whole row ticks it, as on Leftovers; the app itself always goes, so it has no toggle.
+        .onTapGesture { toggle?() }
+        .fileMenu([url])
     }
 }
 
@@ -266,7 +296,9 @@ struct LeftoversView: View {
                             .animation(Motion.count.delay(Beat.tick), value: chosenBytes)
                         Spacer()
                         if model.working { ThinkingDots() }
-                        Button { confirming = true } label: { Label("Move to Trash…", systemImage: "trash") }
+                        Button {
+                            if Ask.beforeTrash { confirming = true } else { Task { await model.removeSelectedOrphans() } }
+                        } label: { Label(Ask.trashTitle, systemImage: "trash") }
                             .spareButton(.primary)
                             .disabled(model.orphanSelection.isEmpty || model.working)
                     }
@@ -312,12 +344,14 @@ struct LeftoversView: View {
         model.orphanSelection = allState == .on ? [] : Set(model.orphans.map(\.id))
     }
 
+    private func toggle(_ orphan: Orphan) {
+        if model.orphanSelection.contains(orphan.id) { model.orphanSelection.remove(orphan.id) } else { model.orphanSelection.insert(orphan.id) }
+    }
+
     private func orphanRow(_ orphan: Orphan) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                CheckBox(state: model.orphanSelection.contains(orphan.id) ? .on : .off) {
-                    if model.orphanSelection.contains(orphan.id) { model.orphanSelection.remove(orphan.id) } else { model.orphanSelection.insert(orphan.id) }
-                }
+                CheckBox(state: model.orphanSelection.contains(orphan.id) ? .on : .off) { toggle(orphan) }
                 .accessibilityLabel(orphan.bundleID)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(orphan.bundleID).font(.system(size: 12.5, weight: .medium, design: .monospaced)).lineLimit(1).truncationMode(.middle)
@@ -339,6 +373,10 @@ struct LeftoversView: View {
                 .controlSize(.small)
                 .accessibilityLabel(expanded.contains(orphan.id) ? "Hide files" : "Show files")
             }
+            // The whole row ticks it, not only the box; the chevron keeps its own click.
+            .contentShape(Rectangle())
+            .onTapGesture { toggle(orphan) }
+            .fileMenu(orphan.leftovers.map(\.url))
             if expanded.contains(orphan.id) {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(orphan.leftovers) { leftover in
@@ -349,6 +387,8 @@ struct LeftoversView: View {
                             SizeText(bytes: leftover.usage.bytes)
                             RevealButton(url: leftover.url)
                         }
+                        .contentShape(Rectangle())
+                        .fileMenu([leftover.url])
                     }
                 }
                 .padding(.leading, 30).padding(.top, 6)

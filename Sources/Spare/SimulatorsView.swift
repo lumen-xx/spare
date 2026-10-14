@@ -344,6 +344,14 @@ private struct DeviceRow: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .contentShape(Rectangle())
+        .contextMenu {
+            Button("Erase Contents…", action: erase).disabled(device.state == "Booted" || !device.isAvailable || !model.working.isEmpty)
+            Button("Delete…", role: .destructive, action: delete).disabled(device.state == "Booted" || !model.working.isEmpty)
+            if let url = device.dataURL {
+                Divider()
+                FileMenuItems(urls: [url])
+            }
+        }
         .hoverWash()
         .hoverLag($hovering)
         .padding(.horizontal, RowWash.inset).padding(.vertical, 1)

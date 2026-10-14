@@ -9,12 +9,15 @@ public enum Origin: String, Sendable, Hashable, CaseIterable {
     case apple
     /// Everything else.
     case thirdParty
+    /// Made by Spare itself, such as its privacy profile.
+    case spare
 
     public var label: String {
         switch self {
         case .macOS: "macOS"
         case .apple: "Apple"
         case .thirdParty: "Added"
+        case .spare: "Spare"
         }
     }
 

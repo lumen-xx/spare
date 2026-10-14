@@ -17,6 +17,10 @@ macOS 14 or newer · Apple silicon
 2. Open it. If macOS blocks it, go to **System Settings → Privacy & Security → Open Anyway**, or run `xattr -dr com.apple.quarantine /Applications/Spare.app`. Spare is signed but not notarized yet.
 3. Optional: give it **Full Disk Access** so it can also look at Downloads, iPhone backups and other apps' data. Without it, Spare skips the folders macOS protects and says which.
 
+### Uninstall
+
+**Settings › Undo and Uninstall › Uninstall…** lists what Spare changed on your Mac, to tick what to put back first, then moves Spare and its files to the Trash. To undo any single setting yourself, with or without Spare, see [Undoing what Spare changed](docs/UNDO.md).
+
 Spare is open source under the [MIT License](LICENSE). It never deletes anything itself: everything goes to the Trash, and History can put it back. It has no background process and only goes online when you check for updates.
 
 Screenshots in docs/images are made from sample data: `swift build`, run `.build/debug/Spare -demo YES -section Cleanup -AppleLocale en_US`, capture the window, then `swift scripts/marketing.swift <window.png> <out.png> <headline> <subtitle> work/marketing/icon.png`.
@@ -42,16 +46,19 @@ Every topic has its own page in the sidebar.
 - **Docker**: the disk file of Docker Desktop, OrbStack, Colima or Podman with the space it really takes, and what's inside as `docker system df` counts it. Build cache, images no container uses and stopped containers are cleared with Docker's own prune commands; volumes can hold databases, so they're only shown.
 - **Browser Extensions**: extensions in every profile of Chrome, Edge, Brave, Arc, Vivaldi, Opera, Firefox and Safari, with the ones that can read and change every website marked. Spare only lists them, since removing one in its browser is what stops it syncing back.
 
+**Privacy & Debloat**
+- **Apple Intelligence**, **Data Sharing**, **Apple Apps** and **Annoyances**: switches for what macOS does, reviewed before anything changes. Settings only a profile can keep off go into one configuration profile, “Spare Privacy”, which you install in System Settings and Spare can remove again; the rest are written like any setting, with the value from before kept so undo puts back exactly that. Apple Intelligence's models are removed through macOS's asset service and kept from downloading again. Apple's built-in apps can't be deleted (they're on the sealed system volume), so Spare blocks them from opening until the next macOS update, and takes them out of the Dock. Nothing under /System changes and System Integrity Protection stays on. Every change can be undone, see [docs/UNDO.md](docs/UNDO.md).
+
 **Startup**
 - **Login Items** and **Background Items**: tables with multiple selection. Launchd jobs can be turned off (`launchctl disable` + `bootout`), on, or removed; items apps register with macOS (from `sfltool dumpbtm`) link to Login Items settings; helper tools nothing starts are flagged.
 
 **System Additions**: System Extensions (removed only with their app, so each says how), Drivers, Plug-ins, Fonts, Input Methods, Installer Packages (what a receipt still has on disk goes to the Trash and macOS forgets the receipt) and Search Paths (/etc/paths.d). Origin comes from installer receipts and Apple's code signature: macOS's own is locked, Apple's optional additions are labelled.
 
-**System Changes**: hidden Accounts installers created (`dscl . -delete`), added Printers (`lpadmin -x`), VPN configurations and configuration Profiles (changed in Settings), and Privacy permissions given to apps (reset with `tccutil`; needs Full Disk Access to read).
+**System Changes**: hidden Accounts installers created (`dscl . -delete`), added Printers (`lpadmin -x`), VPN configurations and configuration Profiles (changed in Settings; Spare's own can be removed), and Privacy permissions given to apps (reset with `tccutil`, or taken out of macOS's permission database for programs it knows only by path; needs Full Disk Access to read).
 
 **Home Folder**: Hidden Items in your home folder named by their owner, with keys marked and leftovers of removed tools flagged; the Shared Folder.
 
-**History** lists every move, with Put Back, until the Trash is emptied. **Settings** holds project folders, Full Disk Access and updates.
+**History** lists every move, with Put Back, until the Trash is emptied. **Settings** holds project folders, Full Disk Access, Finder's small settings (path bar, status bar with the space left, full paths, hidden files, filename extensions and more), updates, and Undo and Uninstall.
 
 ## Honesty rules
 

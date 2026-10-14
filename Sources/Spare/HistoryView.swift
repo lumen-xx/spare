@@ -111,5 +111,8 @@ struct RecordRow: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
+        .contentShape(Rectangle())
+        // Where it is now: in the Trash, or back where it came from. A deleted one has nowhere to show.
+        .fileMenu(state == .inTrash ? [URL(fileURLWithPath: record.trashed)] : state == .putBack ? [URL(fileURLWithPath: record.original)] : [])
     }
 }

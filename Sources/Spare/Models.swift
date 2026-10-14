@@ -50,8 +50,18 @@ final class Shared: ObservableObject {
         /// Something didn't work: shown with a warning instead of a tick, and it stays until it's dismissed.
         var failed = false
         var next: Next?
+        /// What Spare ran and what came back, for Copy Error: exit codes and raw output nobody needs to read in the toast.
+        var log: String?
 
         static func == (a: Banner, b: Banner) -> Bool { a.id == b.id }
+
+        /// Everything about it as text, to paste into a bug report.
+        var report: String {
+            let info = Bundle.main.infoDictionary
+            let version = "Spare \(info?["CFBundleShortVersionString"] as? String ?? "?") (\(info?["CFBundleVersion"] as? String ?? "?")), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)"
+            return ([title, detail].compactMap { $0 } + problems.map { "• " + $0 } + [log.map { "\n" + $0 }, "\n" + version].compactMap { $0 })
+                .joined(separator: "\n")
+        }
     }
 
     @Published private(set) var space: Volume.Space?
@@ -466,7 +476,7 @@ final class AppsModel: ObservableObject {
                     group.addTask {
                         await background {
                             let cancel = Cancellation()
-                            return (app.id, DiskUsage.measure(app.url), app.isApple ? [] : Apps.leftovers(for: app, home: home, fullDiskAccess: fullDiskAccess, cancel: cancel))
+                            return (app.id, DiskUsage.measure(app.url), !app.removable ? [] : Apps.leftovers(for: app, home: home, fullDiskAccess: fullDiskAccess, cancel: cancel))
                         }
                     }
                 }
@@ -702,6 +712,7 @@ enum Refresh {
         ExtensionsModel.shared.reloadIfStarted()
         StartupModel.shared.reloadIfStarted()
         SystemChangesModel.shared.reloadIfStarted()
+        DebloatModel.shared.reloadIfStarted()
         HomeModel.shared.reloadIfStarted()
     }
 }

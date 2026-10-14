@@ -233,6 +233,8 @@ struct DockerView: View {
                         RevealButton(url: disk.url)
                     }
                     .padding(.horizontal, 12).padding(.vertical, 8)
+                    .contentShape(Rectangle())
+                    .fileMenu([disk.url])
                 }
             }
         }
