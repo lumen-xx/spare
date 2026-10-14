@@ -38,7 +38,7 @@ final class DebloatModel: ObservableObject {
 
     func load() {
         #if DEBUG
-        if Demo.isOn { return }
+        if Demo.isOn { if undoable == nil { undoable = .init() }; return }
         #endif
         started = true
         loading = true
@@ -879,7 +879,7 @@ private struct DebloatReview: View {
                     point("arrow.triangle.2.circlepath", "This makes a new version of “Spare Privacy”. Once you approve it, it replaces the one installed now.")
                 }
                 point("arrow.uturn.backward", installing || model.profile != nil
-                      ? "To undo one, switch it back on here and apply again. To undo all of them, click Remove Profile… at the bottom of this page, or switch everything back on."
+                      ? "To undo one, switch it back on here and apply again. To undo all of them, click Remove Profile… at the top of this page, or switch everything back on."
                       : "Switch anything back on here to undo it.")
             }
             HStack(spacing: 8) {

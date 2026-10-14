@@ -134,11 +134,15 @@ final class SystemChangesModel: ObservableObject {
             let command = asAdministrator.map { part in
                 "out=$( (\(part.command)) 2>&1 ) || printf '%s%s\\n' \(Privileged.quoted(part.name.isEmpty ? "" : part.name + ": ")) \"$out\""
             }.joined(separator: "\n")
-            // A command the shell can't read would fail as a whole after the password, with nothing deleted.
-            let parsed = await background { Shell.run("/bin/sh", ["-n", "-c", command], timeout: 10) }
-            log.append("Shell check of the administrator command (exit \(parsed.status)): \(parsed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
-            if parsed.status != 0 {
-                problems.append("Spare made a command macOS's shell can't read, so it didn't ask for your password: \(parsed.output.trimmingCharacters(in: .whitespacesAndNewlines))")
+            // A command the shell can't read would fail after the password, with nothing deleted. Each part is
+            // checked on its own: inside $( ) the shell reads a part only when it runs it.
+            let parts = [command] + asAdministrator.map(\.command)
+            let unreadable = await background {
+                parts.lazy.map { Shell.run("/bin/sh", ["-n", "-c", $0], timeout: 10) }.first { $0.status != 0 }
+            }
+            log.append("Shell check of the administrator command: \(unreadable.map { "exit \($0.status): " + $0.output.trimmingCharacters(in: .whitespacesAndNewlines) } ?? "fine")")
+            if let unreadable {
+                problems.append("Spare made a command macOS's shell can't read, so it didn't ask for your password: \(unreadable.output.trimmingCharacters(in: .whitespacesAndNewlines))")
             } else {
                 let result = Privileged.call(command, prompt: "Spare wants to change \(asAdministrator.count == 1 ? "a setting" : "\(asAdministrator.count) settings") for every account.", privileged: true)
                 log.append("As administrator: \(result.problem.map { "failed: " + $0 } ?? "finished")\n\((result.output ?? "").trimmingCharacters(in: .whitespacesAndNewlines))")

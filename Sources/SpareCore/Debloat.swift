@@ -36,11 +36,17 @@ public enum Debloat {
             }
         }
 
-        /// Whether a stored value means the same. `-bool true` and `-int 1` both happen, so they match.
+        /// Whether a stored value means the same. `-bool true`, `-int 1` and `-string YES` all happen, so they match.
         public func matches(_ stored: Any?) -> Bool {
             guard let other = Value(stored) else { return false }
             switch (self, other) {
             case (.bool(let a), .int(let b)), (.int(let b), .bool(let a)): return (b != 0) == a
+            case (.bool(let a), .string(let b)), (.string(let b), .bool(let a)):
+                switch b.lowercased() {
+                case "yes", "true", "1": return a
+                case "no", "false", "0": return !a
+                default: return false
+                }
             case (.double(let a), .int(let b)), (.int(let b), .double(let a)): return a == Double(b)
             default: return self == other
             }

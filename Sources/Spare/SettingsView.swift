@@ -110,6 +110,8 @@ struct SettingsView: View {
             }
             .toggleStyle(SpareSwitchStyle())
             .onAppear { finder.load() }
+            // Finder's own switches, like Command-Shift-. for hidden files, show here when you come back to Spare.
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in finder.load() }
             .arrives(2)
 
             group("How Spare Feels", footer: "Motion follows Reduce Motion, and colours follow Increase Contrast, in the Accessibility settings of your Mac.") {

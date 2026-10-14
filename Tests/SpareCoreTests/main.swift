@@ -1046,14 +1046,19 @@ check(!BuiltInApps.list().contains { $0.url.lastPathComponent == "System Setting
 // MARK: Undo everything
 
 if let tweak = Debloat.all.first(where: { $0.changes.contains { if case .pref = $0 { true } else { false } } }),
-   case .pref(let domain, let key, _)? = tweak.changes.first(where: { if case .pref = $0 { true } else { false } }) {
+   case .pref(let domain, let key, let value)? = tweak.changes.first(where: { if case .pref = $0 { true } else { false } }) {
     var journal = Debloat.Journal()
-    check(!Debloat.changedBySpare(tweak, journal: journal), "leaves a setting Spare never changed to the person")
+    let spares: (String, String) -> Any? = { _, _ in value.object }
+    check(!Debloat.changedBySpare(tweak, journal: journal, read: spares), "leaves a setting Spare never changed to the person")
     journal.entries["pref:\(domain):\(key)"] = .init(previous: .pref(nil), date: Date())
     journal.entries["dock:com.apple.Chess"] = .init(previous: .dock([]), date: Date())
-    let undoable = Debloat.undoable(apps: [], disabled: [], journal: journal)
-    check(Debloat.changedBySpare(tweak, journal: journal) && undoable.tweaks == [tweak.id] && undoable.blocked.isEmpty,
+    let undoable = Debloat.undoable(apps: [], disabled: [], journal: journal, read: spares)
+    check(Debloat.changedBySpare(tweak, journal: journal, read: spares) && undoable.tweaks == [tweak.id] && undoable.blocked.isEmpty,
           "undoes only what Spare recorded changing, and never the Dock (\(undoable))")
+    check(!Debloat.changedBySpare(tweak, journal: journal, read: { _, _ in nil }) || value.matches(nil),
+          "leaves a setting the person changed back since")
+    check(Debloat.Value.bool(true).matches("YES") && Debloat.Value.bool(false).matches("no") && !Debloat.Value.bool(true).matches("NO"),
+          "reads `defaults write … YES` as on")
 } else {
     check(false, "the catalog has a setting outside the profile")
 }

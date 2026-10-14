@@ -158,6 +158,10 @@ struct ExtensionsView: View {
     @State private var hideMacOS = false
     @State private var confirming = false
 
+    /// Rows asked about even when Spare doesn't ask before the Trash: an installer receipt can't be put back, and
+    /// removing an audio driver restarts the audio system, so sound stops for a moment, calls too.
+    static func alwaysAsk(_ row: ExtensionRow) -> Bool { row.item.category == .receipts || row.item.category == .audioDrivers }
+
     private var mine: [ExtensionRow] { model.rows.filter { page.extensionCategories.contains($0.item.category) } }
     private var visible: [ExtensionRow] {
         mine.filter { row in
@@ -252,10 +256,11 @@ struct ExtensionsView: View {
                 Button("Open Login Items & Extensions Settings…") { Permissions.openLoginItemsSettings() }
             }
             Divider()
-            // Forgetting an installer receipt can't be put back, so that's always asked.
-            Button(rows.contains { $0.item.category == .receipts } ? "Move to Trash…" : Ask.trashTitle, role: .destructive) {
+            // Forgetting an installer receipt can't be put back, and removing an audio driver stops sound for a
+            // moment, calls too, so those are always asked.
+            Button(rows.contains(where: Self.alwaysAsk) ? "Move to Trash…" : Ask.trashTitle, role: .destructive) {
                 selection = Set(ids)
-                if Ask.beforeTrash || rows.contains(where: { $0.item.category == .receipts }) { confirming = true }
+                if Ask.beforeTrash || rows.contains(where: Self.alwaysAsk) { confirming = true }
                 else { Task { await model.remove(rows) } }
             }
                 .disabled(!rows.contains(where: \.item.removable))
@@ -316,8 +321,8 @@ struct ExtensionsView: View {
             if removable.isEmpty, let owner = chosen.first(where: { $0.item.ownerURL != nil })?.item, let url = owner.ownerURL {
                 Button("Uninstall \(owner.owner ?? "the App")…") { ExtensionsView.uninstall(app: url) }.spareButton(.secondary)
             } else {
-                Button(chosen.contains { $0.item.category == .receipts } ? "Remove…" : Ask.trashTitle, role: .destructive) {
-                    if Ask.beforeTrash || chosen.contains(where: { $0.item.category == .receipts }) { confirming = true }
+                Button(chosen.contains(where: Self.alwaysAsk) ? "Remove…" : Ask.trashTitle, role: .destructive) {
+                    if Ask.beforeTrash || chosen.contains(where: Self.alwaysAsk) { confirming = true }
                     else { let rows = chosen; Task { await model.remove(rows) } }
                 }
                     .spareButton(.secondary)

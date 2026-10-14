@@ -129,14 +129,18 @@ extension Debloat {
             case .restriction, .forced:
                 continue
             case .pref(let domain, let name, let value):
-                if journal.entries[key] == nil {
+                // The value from before, recorded again when something other than Spare changed it since.
+                if journal.entries[key] == nil || !value.matches(Prefs.read(domain, name)) {
                     journal.entries[key] = .init(previous: .pref(Value(Prefs.own(domain, name))), date: Date())
+                    journal.save()
                 }
                 Prefs.write(domain, name, value)
                 if !value.matches(Prefs.read(domain, name)) { problems.append("\(tweak.title): macOS didn't take the change.") }
             case .service(let label):
-                if journal.entries[key] == nil {
-                    journal.entries[key] = .init(previous: .disabled(Launchd.disabledInSession().contains(label)), date: Date())
+                let disabled = Launchd.disabledInSession().contains(label)
+                if journal.entries[key] == nil || !disabled {
+                    journal.entries[key] = .init(previous: .disabled(disabled), date: Date())
+                    journal.save()
                 }
                 if let problem = Launchd.disable(label) { problems.append("\(tweak.title): \(problem)") }
             }
@@ -156,8 +160,8 @@ extension Debloat {
             case .pref(let domain, let name, _):
                 var previous: Value?
                 if case .pref(let value)? = journal.entries[key]?.previous { previous = value }
-                Prefs.write(domain, name, previous)
-                journal.entries[key] = nil
+                // The entry stays when macOS didn't take the value, so undo can try again.
+                if Prefs.write(domain, name, previous) { journal.entries[key] = nil } else { problems.append("\(tweak.title): macOS didn't take the change.") }
             case .service(let label):
                 if case .disabled(true)? = journal.entries[key]?.previous {
                     // It was off before Spare came along, so it stays off.
@@ -273,10 +277,19 @@ public enum Dock {
 // MARK: - Undoing everything
 
 extension Debloat {
-    /// Whether Spare recorded changing something of this tweak outside the profile: only that is Spare's to undo,
-    /// never a setting the person chose themselves in System Settings.
-    public static func changedBySpare(_ tweak: Tweak, journal: Journal) -> Bool {
-        tweak.changes.contains { !$0.inProfile && journal.entries[Journal.key($0)] != nil }
+    /// Whether Spare recorded changing something of this tweak outside the profile and that change is still in place:
+    /// only that is Spare's to undo, never a setting the person chose themselves in System Settings, before or since.
+    /// `read` gives a setting's value now and `disabled` the jobs switched off; nil doesn't check jobs.
+    public static func changedBySpare(_ tweak: Tweak, journal: Journal, read: (String, String) -> Any? = Prefs.read,
+                                      disabled: Set<String>? = nil) -> Bool {
+        tweak.changes.contains { change in
+            guard !change.inProfile, journal.entries[Journal.key(change)] != nil else { return false }
+            switch change {
+            case .pref(let domain, let name, let value): return value.matches(read(domain, name))
+            case .service(let label): return disabled?.contains(label) ?? true
+            case .restriction, .forced: return false
+            }
+        }
     }
 
     /// What Spare changed outside its profile, as read now. The Dock isn't part of it: icons taken out stay out.
@@ -291,8 +304,9 @@ extension Debloat {
         }
     }
 
-    public static func undoable(apps: [BuiltInApp], disabled: Set<String>, journal: Journal = .load()) -> Undoable {
-        Undoable(tweaks: all.filter { changedBySpare($0, journal: journal) }.map(\.id),
+    public static func undoable(apps: [BuiltInApp], disabled: Set<String>, journal: Journal = .load(),
+                                read: (String, String) -> Any? = Prefs.read) -> Undoable {
+        Undoable(tweaks: all.filter { changedBySpare($0, journal: journal, read: read, disabled: disabled) }.map(\.id),
                  blocked: apps.filter { BuiltInApps.block(of: $0, disabled: disabled) != .open }.map(\.bundleID))
     }
 
@@ -304,7 +318,8 @@ extension Debloat {
         var journal = Journal.load()
         var problems: [String] = []
         var restart = Set<String>()
-        for tweak in all where changedBySpare(tweak, journal: journal) && chosen?.contains(tweak.id) != false {
+        let jobs = Launchd.disabledInSession()
+        for tweak in all where changedBySpare(tweak, journal: journal, disabled: jobs) && chosen?.contains(tweak.id) != false {
             problems += revert(tweak, journal: &journal)
             restart.formUnion(tweak.restart)
         }

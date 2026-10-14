@@ -82,7 +82,7 @@ Apple Intelligence's models download again by themselves once the profile is gon
 A block lasts until the next macOS update replaces the app. To lift every block now:
 
 ```bash
-launchctl print-disabled gui/$(id -u) | awk -F'"' '/"application\.com\.apple\..*=> disabled/ {print $2}' | while read job; do launchctl enable "gui/$(id -u)/$job"; done
+launchctl print-disabled gui/$(id -u) | awk -F'"' '/"application\.com\.apple\..*=> (disabled|true)/ {print $2}' | while read job; do launchctl enable "gui/$(id -u)/$job"; done
 ```
 
 ### Finder
@@ -120,6 +120,6 @@ By hand: quit Spare, undo what you want as above, then move these to the Trash:
 - `~/Library/Application Support/Spare`
 - `~/Library/Caches/com.opyuii.spare`
 - `~/Library/Preferences/com.opyuii.spare.plist`
-- `~/Library/HTTPStorages/com.opyuii.spare` and `~/Library/Saved Application State/com.opyuii.spare.savedState`, if they're there
+- `~/Library/HTTPStorages/com.opyuii.spare`, `~/Library/WebKit/com.opyuii.spare` and `~/Library/Saved Application State/com.opyuii.spare.savedState`, if they're there
 
 Spare has no background process or login item, so nothing else is left running.

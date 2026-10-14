@@ -53,7 +53,10 @@ struct Sidebar: View {
                 }
                 .onChange(of: navigation.page) { _, page in
                     unfold(sectionOf(page))
-                    withAnimation(reduceMotion ? nil : Motion.settle) { scroller.scrollTo(page, anchor: nil) }
+                    // After the unfolded section's rows exist; those of a folded one don't yet.
+                    DispatchQueue.main.async {
+                        withAnimation(reduceMotion ? nil : Motion.settle) { scroller.scrollTo(page, anchor: nil) }
+                    }
                 }
                 .onAppear {
                     unfold(sectionOf(navigation.page))
@@ -113,11 +116,15 @@ struct Sidebar: View {
         if let title, folded.contains(title) { fold(title, false) }
     }
 
+    /// The next page that shows, counted from where the chosen page is in the whole list, so the arrows still work
+    /// when its own section has just been folded.
     private func move(_ step: Int) -> KeyPress.Result {
-        guard let index = visible.firstIndex(of: navigation.page) else { return .ignored }
-        let next = index + step
-        guard visible.indices.contains(next) else { return .handled }
-        navigation.page = visible[next]
+        let all = Page.sections.flatMap(\.1) + [.history, .settings]
+        guard let index = all.firstIndex(of: navigation.page) else { return .ignored }
+        let showing = Set(visible)
+        var next = index + step
+        while all.indices.contains(next), !showing.contains(all[next]) { next += step }
+        if all.indices.contains(next) { navigation.page = all[next] }
         return .handled
     }
 

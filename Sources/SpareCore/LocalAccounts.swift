@@ -26,8 +26,9 @@ public enum LocalAccounts {
         let permission = Permission(reference)
         let status: OSStatus = right.withCString { name in
             prompt.withCString { text in
+            kAuthorizationEnvironmentPrompt.withCString { promptName in
                 var item = AuthorizationItem(name: name, valueLength: 0, value: nil, flags: 0)
-                var message = AuthorizationItem(name: kAuthorizationEnvironmentPrompt, valueLength: strlen(text),
+                var message = AuthorizationItem(name: promptName, valueLength: strlen(text),
                                                 value: UnsafeMutableRawPointer(mutating: text), flags: 0)
                 return withUnsafeMutablePointer(to: &item) { items in
                     withUnsafeMutablePointer(to: &message) { messages in
@@ -36,6 +37,7 @@ public enum LocalAccounts {
                         return AuthorizationCopyRights(reference, &rights, &environment, [.interactionAllowed, .extendRights, .preAuthorize], nil)
                     }
                 }
+            }
             }
         }
         switch status {

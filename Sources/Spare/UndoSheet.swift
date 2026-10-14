@@ -21,6 +21,10 @@ struct UndoSheet: View {
     }
 
     private var items: [DebloatModel.UndoItem] { model.undoItems }
+    /// Until Spare has looked, the list may be missing things; nothing can go ahead before then.
+    private var looking: Bool { model.undoable == nil }
+    /// What's ticked of what's listed now, as the list can change while the sheet is open.
+    private var picked: Set<DebloatModel.UndoItem> { chosen.intersection(items) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -33,15 +37,20 @@ struct UndoSheet: View {
                         .font(.spare(size: 12)).foregroundStyle(.secondary)
                 }
             }
-            if items.isEmpty {
+            if looking {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Looking at what Spare changed…").font(.spare(size: 12.5)).foregroundStyle(.secondary)
+                }
+            } else if items.isEmpty {
                 Text("Spare hasn't changed anything under Privacy & Debloat, so there's nothing to undo.")
                     .font(.spare(size: 12.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 6) {
-                        CheckBox(state: chosen.isEmpty ? .off : chosen.count == items.count ? .on : .mixed) {
+                        CheckBox(state: picked.isEmpty ? .off : picked.count == items.count ? .on : .mixed) {
                             touched = true
-                            chosen = chosen.count == items.count ? [] : Set(items)
+                            chosen = picked.count == items.count ? [] : Set(items)
                         }
                         .accessibilityLabel("Select All")
                         Text("Select All").font(.spare(size: 12, weight: .medium)).foregroundStyle(.secondary)
@@ -67,12 +76,12 @@ struct UndoSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.spareButton(.secondary).keyboardShortcut(.cancelAction)
                 Button(primaryTitle) {
-                    let picked = chosen
+                    let picked = picked
                     dismiss()
                     finish(picked)
                 }
                 .spareButton(.primary).keyboardShortcut(.defaultAction)
-                .disabled(purpose == .undo && chosen.isEmpty)
+                .disabled(looking || (purpose == .undo && picked.isEmpty))
             }
         }
         .padding(24)
@@ -84,10 +93,10 @@ struct UndoSheet: View {
     }
 
     private var primaryTitle: String {
-        let count = chosen.count == 1 ? "1 Change" : "\(chosen.count) Changes"
+        let count = picked.count == 1 ? "1 Change" : "\(picked.count) Changes"
         switch purpose {
         case .undo: return "Undo \(count)"
-        case .uninstall: return chosen.isEmpty ? "Uninstall" : "Undo \(count) and Uninstall"
+        case .uninstall: return picked.isEmpty ? "Uninstall" : "Undo \(count) and Uninstall"
         }
     }
 

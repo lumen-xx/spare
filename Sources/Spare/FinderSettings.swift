@@ -29,6 +29,8 @@ final class FinderSettings: ObservableObject {
         if Demo.isOn { return }
         #endif
         FinderOptions.set(option, on: on)
+        // What Finder will actually read: a value set elsewhere, for the whole Mac or by a profile, can still win.
+        states = FinderOptions.states()
         restartFinderSoon()
     }
 
