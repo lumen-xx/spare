@@ -316,6 +316,36 @@ struct UsageBar: View {
     }
 }
 
+/// A bar for work whose length isn't known yet: a short stretch glides from end to end and back. With Reduce Motion
+/// the whole bar breathes instead.
+struct SweepBar: View {
+    var tint: Color?
+    var height: CGFloat = 6
+    @State private var across = false
+    @Environment(\.reduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            let stretch = geometry.size.width * 0.28
+            ZStack(alignment: .leading) {
+                Capsule().fill(Ink.press)
+                Capsule()
+                    .fill(tint.map(AnyShapeStyle.init) ?? AnyShapeStyle(.tint))
+                    .frame(width: reduceMotion ? geometry.size.width : stretch)
+                    .opacity(reduceMotion ? (across ? 0.55 : 0.2) : 1)
+                    .offset(x: reduceMotion ? 0 : (across ? geometry.size.width - stretch : 0))
+            }
+        }
+        .frame(height: height)
+        .clipShape(Capsule())
+        .onAppear {
+            withAnimation(reduceMotion ? .easeInOut(duration: 0.9).repeatForever()
+                                       : .spring(response: 1.3, dampingFraction: 1).repeatForever()) { across = true }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
 /// Three dots bobbing while Spare works, so a wait never looks like a stall. With Reduce Motion they only fade.
 struct ThinkingDots: View {
     var tint: Color = .secondary

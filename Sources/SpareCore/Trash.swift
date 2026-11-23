@@ -110,27 +110,139 @@ public enum TrashEmptier {
         public var needsAdministrator: [URL] = []
         /// Items that couldn't be deleted at all, with why.
         public var failed: [(URL, String)] = []
+        /// Stopped before the end, as asked. Whatever wasn't deleted yet is still in the Trash.
+        public var stopped = false
+        public init() {}
     }
 
-    public static func empty(_ trash: URL) -> Result {
+    /// How far emptying has got, reported as it goes.
+    public struct Progress: Sendable, Equatable {
+        public enum Step: Sendable, Equatable { case counting, deleting, unlocking }
+        public var step = Step.counting
+        /// Items directly in the Trash, and how many have been counted, or deleted (or given up on).
+        public var items = 0
+        public var itemsDone = 0
+        /// Files and folders inside them all. Deleting goes through them one at a time, so the bar moves by these
+        /// rather than by items: one folder can hold most of the Trash.
+        public var entries = 0
+        public var entriesDone = 0
+        /// The size of it all, and roughly how much of that is deleted so far.
+        public var bytes: Int64 = 0
+        public var bytesDone: Int64 = 0
+        /// The item being counted or deleted now.
+        public var current: String?
+        public init() {}
+
+        public var fraction: Double { entries > 0 ? min(1, Double(entriesDone) / Double(entries)) : 0 }
+    }
+
+    /// Empties `trash`. It counts what's inside first, then deletes, calling `report` (on this thread, at most about
+    /// 15 times a second) as it goes. When `cancel` is set it stops soon, even inside a large folder.
+    public static func empty(_ trash: URL, cancel: Cancellation? = nil, report: ((Progress) -> Void)? = nil) -> Result {
         var result = Result()
         let items = (try? FileManager.default.contentsOfDirectory(at: trash, includingPropertiesForKeys: nil, options: [])) ?? []
+        let deletion = Deletion(cancel: cancel, report: report)
+        deletion.progress.items = items.count
+        deletion.send(force: true)
+
+        var sizes: [Usage] = []
         for item in items {
-            if delete(item) { result.removed += 1; continue }
-            unlock(item)
-            do {
-                try FileManager.default.removeItem(at: item)
-                result.removed += 1
-            } catch where Trash.isPermission(error) {
-                result.needsAdministrator.append(item)
-            } catch {
-                result.failed.append((item, error.localizedDescription))
-            }
+            if cancel?.isCancelled == true { result.stopped = true; return result }
+            deletion.progress.current = item.lastPathComponent
+            deletion.send()
+            let usage = DiskUsage.measure(item, cancel: cancel)
+            sizes.append(usage)
+            deletion.progress.itemsDone += 1
+            deletion.progress.entries += max(1, usage.files + usage.folders)
+            deletion.progress.bytes += usage.bytes + usage.shared
         }
+
+        deletion.progress.step = .deleting
+        deletion.progress.itemsDone = 0
+        deletion.send(force: true)
+        let manager = FileManager()
+        manager.delegate = deletion
+        for (item, usage) in zip(items, sizes) {
+            if cancel?.isCancelled == true { result.stopped = true; break }
+            deletion.begin(item, usage)
+            let removedBefore = result.removed
+            if (try? manager.removeItem(at: item)) != nil {
+                result.removed += 1
+            } else if cancel?.isCancelled == true {
+                // Stopping makes the rest of the folder fail as if it were protected; that's not a problem to report.
+                result.stopped = true
+                break
+            } else {
+                deletion.progress.step = .unlocking
+                deletion.send(force: true)
+                unlock(item)
+                deletion.progress.step = .deleting
+                do {
+                    try manager.removeItem(at: item)
+                    result.removed += 1
+                } catch where cancel?.isCancelled == true {
+                    result.stopped = true
+                    break
+                } catch where Trash.isPermission(error) {
+                    result.needsAdministrator.append(item)
+                } catch {
+                    result.failed.append((item, error.localizedDescription))
+                }
+            }
+            deletion.finish(deleted: result.removed > removedBefore)
+        }
+        deletion.progress.current = nil
+        deletion.send(force: true)
         return result
     }
 
-    static func delete(_ url: URL) -> Bool { (try? FileManager.default.removeItem(at: url)) != nil }
+    /// Counts entries as FileManager deletes them, which it asks about one by one, even deep inside a folder.
+    private final class Deletion: NSObject, FileManagerDelegate {
+        var progress = Progress()
+        private let cancel: Cancellation?
+        private let report: ((Progress) -> Void)?
+        private var lastSent = 0.0
+        /// The item being deleted: where the totals stood before it, its own size, and how many entries are gone.
+        private var before = (entries: 0, bytes: Int64(0))
+        private var size = (entries: 1, bytes: Int64(0))
+        private var seen = 0
+
+        init(cancel: Cancellation?, report: ((Progress) -> Void)?) { self.cancel = cancel; self.report = report }
+
+        func begin(_ item: URL, _ usage: Usage) {
+            before = (progress.entriesDone, progress.bytesDone)
+            size = (max(1, usage.files + usage.folders), usage.bytes + usage.shared)
+            seen = 0
+            progress.current = item.lastPathComponent
+            send(force: true)
+        }
+
+        /// The item is dealt with. Its entries count as gone through either way; its size only when it was deleted.
+        func finish(deleted: Bool) {
+            progress.itemsDone += 1
+            progress.entriesDone = before.entries + size.entries
+            if deleted { progress.bytesDone = before.bytes + size.bytes }
+            send()
+        }
+
+        func fileManager(_ fileManager: FileManager, shouldRemoveItemAt url: URL) -> Bool {
+            if cancel?.isCancelled == true { return false }
+            seen += 1
+            let share = min(1, Double(seen) / Double(size.entries))
+            progress.entriesDone = before.entries + min(seen, size.entries)
+            progress.bytesDone = before.bytes + Int64(Double(size.bytes) * share)
+            send()
+            return true
+        }
+
+        func send(force: Bool = false) {
+            guard let report else { return }
+            let now = Date.timeIntervalSinceReferenceDate
+            guard force || now - lastSent >= 1.0 / 15 else { return }
+            lastSent = now
+            report(progress)
+        }
+    }
 
     /// Clears the "locked" flag and gives the owner write access throughout, which deleting needs.
     static func unlock(_ url: URL) {

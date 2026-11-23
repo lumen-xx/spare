@@ -9,15 +9,18 @@ public struct Usage: Sendable, Hashable {
     /// frees none of it, so it is never counted in `bytes`.
     public var shared: Int64 = 0
     public var files = 0
+    /// Folders, counting the item itself when it is one. With `files`, how many entries deleting it goes through.
+    public var folders = 0
     /// Folders inside that couldn't be read, usually for lack of permission. The size is then a lower bound.
     public var unreadable = 0
 
-    public init(bytes: Int64 = 0, shared: Int64 = 0, files: Int = 0, unreadable: Int = 0) {
-        self.bytes = bytes; self.shared = shared; self.files = files; self.unreadable = unreadable
+    public init(bytes: Int64 = 0, shared: Int64 = 0, files: Int = 0, folders: Int = 0, unreadable: Int = 0) {
+        self.bytes = bytes; self.shared = shared; self.files = files; self.folders = folders; self.unreadable = unreadable
     }
 
     public static func + (a: Usage, b: Usage) -> Usage {
-        Usage(bytes: a.bytes + b.bytes, shared: a.shared + b.shared, files: a.files + b.files, unreadable: a.unreadable + b.unreadable)
+        Usage(bytes: a.bytes + b.bytes, shared: a.shared + b.shared, files: a.files + b.files, folders: a.folders + b.folders,
+              unreadable: a.unreadable + b.unreadable)
     }
 }
 
@@ -82,6 +85,7 @@ public enum DiskUsage {
                 close(above: level)
                 guard total >= 0 else { break }
                 let own = Int64(entry.pointee.fts_statp.pointee.st_blocks) * 512
+                usage.folders += 1
                 usage.bytes += own
                 add(total + own, at: level)
                 if total + own >= threshold, let folders { folders(String(cString: entry.pointee.fts_path), total + own) }

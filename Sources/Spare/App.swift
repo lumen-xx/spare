@@ -49,11 +49,23 @@ struct SpareApp: App {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") { Navigation.shared.page = .settings }.keyboardShortcut(",")
             }
-            CommandMenu("Scan") {
+            ScanCommands()
+        }
+    }
+}
+
+/// The Scan menu. Its commands wait while the Trash empties, as the window does.
+struct ScanCommands: Commands {
+    @ObservedObject private var emptying = TrashEmptying.shared
+
+    var body: some Commands {
+        CommandMenu("Scan") {
+            Group {
                 Button("Scan Again") { CleanupModel.shared.scan() }.keyboardShortcut("r")
                 Divider()
                 Button("Empty Trash…") { Shared.shared.emptyTrash() }.keyboardShortcut(.delete, modifiers: [.command, .shift])
             }
+            .disabled(emptying.active)
         }
     }
 }
@@ -80,6 +92,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                              detail: "Finder couldn't delete 2 items because an app is still using them. Quit it and try again.",
                                              failed: true, next: .init(title: "Try Again") { Shared.shared.emptyTrash() })
             }
+        }
+        // Empties a stand-in Trash without asking, to see the screen shown meanwhile: `-trashFolder /path -previewEmptying YES`.
+        // Only with a stand-in, so it never touches the real Trash.
+        if UserDefaults.standard.bool(forKey: "previewEmptying"), Shared.trashStandIn != nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { MainActor.assumeIsolated { TrashEmptying.shared.start() } }
         }
         #endif
     }
@@ -198,6 +215,7 @@ struct ContentView: View {
     @ObservedObject private var shared = Shared.shared
     @ObservedObject private var cleanup = CleanupModel.shared
     @ObservedObject private var tint = AppTint.shared
+    @ObservedObject private var emptying = TrashEmptying.shared
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     /// Where the page column is in the window, for laying the message over it.
     @State private var detail = CGRect.zero
@@ -255,6 +273,9 @@ struct ContentView: View {
             .background(PaperBackground().ignoresSafeArea())
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.window)) } action: { detail = $0 }
         }
+        // While the Trash empties, everything waits under the screen laid over it.
+        .disabled(emptying.active)
+        .accessibilityHidden(emptying.active)
         // The message lives outside the split view, which builds the page column anew on every page change; inside it
         // the message would arrive again each time. It's laid over the page column all the same.
         .overlay(alignment: .topLeading) {
@@ -265,6 +286,12 @@ struct ContentView: View {
                 // Measured from the window's top, so laid out from there too rather than from below the toolbar.
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .ignoresSafeArea()
+        }
+        .overlay {
+            ZStack {
+                if emptying.active { EmptyingScreen().transition(.opacity) }
+            }
+            .animation(reduceMotion ? Motion.calm : Motion.settle, value: emptying.active)
         }
         .coordinateSpace(.named(Self.window))
         .font(.spare(size: 13))

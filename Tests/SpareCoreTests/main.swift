@@ -332,6 +332,31 @@ check(emptied.removed == 3 && emptied.needsAdministrator.isEmpty && emptied.fail
       && (try? fm.contentsOfDirectory(atPath: fakeTrash.path))?.isEmpty == true,
       "empties a Trash folder, unlocking locked files and read-only folders (\(emptied.removed) removed)")
 
+// Emptying reports as it goes: counting first, then deleting file by file inside a folder, ending at the full size.
+for index in 0..<400 { write("progress-trash/project/src/file\(index).bin", bytes: 100) }
+write("progress-trash/single.bin", bytes: 100)
+let progressTrash = root.appendingPathComponent("progress-trash")
+let progressSize = DiskUsage.measure(progressTrash)
+var reports: [TrashEmptier.Progress] = []
+let progressRun = TrashEmptier.empty(progressTrash) { reports.append($0) }
+let deleting = reports.filter { $0.step == .deleting }
+let lastReport = reports.last
+check(progressRun.removed == 2 && !progressRun.stopped && reports.first?.step == .counting && reports.first?.items == 2
+      && deleting.contains { $0.fraction > 0 && $0.fraction < 1 } && lastReport?.fraction == 1 && lastReport?.itemsDone == 2
+      && lastReport?.entries == 400 + 2 + 1 && lastReport?.bytesDone == lastReport?.bytes && lastReport?.bytes == progressSize.bytes - blocks(progressTrash.path)
+      && zip(deleting, deleting.dropFirst()).allSatisfy { $0.entriesDone <= $1.entriesDone },
+      "reports emptying as it goes, by files and folders (\(reports.count) reports, ended at \(lastReport.map { "\($0.entriesDone) of \($0.entries)" } ?? "none"))")
+
+// Stopping part way leaves the rest in the Trash, and isn't mistaken for something needing an administrator.
+for index in 0..<5_000 { write("stop-trash/big/file\(index).bin", bytes: 10) }
+let stopTrash = root.appendingPathComponent("stop-trash")
+let stopper = Cancellation()
+let stoppedRun = TrashEmptier.empty(stopTrash, cancel: stopper) { if $0.step == .deleting, $0.entriesDone > 50 { stopper.cancel() } }
+let leftInBig = (try? fm.contentsOfDirectory(atPath: stopTrash.appendingPathComponent("big").path).count) ?? 0
+check(stoppedRun.stopped && stoppedRun.removed == 0 && stoppedRun.needsAdministrator.isEmpty && stoppedRun.failed.isEmpty
+      && leftInBig > 0 && leftInBig < 5_000,
+      "stops emptying part way through a folder when asked (\(leftInBig) of 5000 files left)")
+
 // MARK: System changes
 
 let accountList = "_amavisd 83\n_BGMXPCHelper 502\nlumen 501\nguest 201\nanna 503\n"

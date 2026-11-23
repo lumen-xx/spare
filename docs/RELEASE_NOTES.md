@@ -1,3 +1,3 @@
-# Spare 0.5.4
+# Spare 0.5.5
 
-- **Blocked apps stand out on Apple Apps.** They're listed first, say “Blocked” next to a filled Allow button, and their names are dimmed, so you can see at a glance what's blocked and let it open again.
+- **See the Trash empty.** While Spare empties the Trash, the window is blurred behind a card that shows what's happening: counting, deleting which item, a bar, how many files are left, how much is deleted so far and roughly how long is left. Stop (or Esc) ends it after the file being deleted; the rest stays in the Trash.

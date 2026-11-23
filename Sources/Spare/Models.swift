@@ -100,9 +100,10 @@ final class Shared: ObservableObject {
                 AppsModel.shared.loadIfStarted()
             }
         }
-        guard access else { trashBytes = nil; return }
+        guard canSeeTrash else { trashBytes = nil; return }
+        let trash = Self.trashFolder
         Task {
-            let usage = await background { DiskUsage.measure(home.appendingPathComponent(".Trash")) }
+            let usage = await background { DiskUsage.measure(trash) }
             self.trashBytes = usage.bytes + usage.shared
         }
     }
@@ -119,7 +120,29 @@ final class Shared: ObservableObject {
         }
     }
 
+    /// The person's Trash. A development build can point this at a stand-in folder (`-trashFolder /path`), to check
+    /// emptying without touching the real one.
+    nonisolated static var trashFolder: URL {
+        #if DEBUG
+        if let standIn = trashStandIn { return URL(fileURLWithPath: standIn) }
+        #endif
+        return home.appendingPathComponent(".Trash")
+    }
+
+    #if DEBUG
+    nonisolated static var trashStandIn: String? { UserDefaults.standard.string(forKey: "trashFolder") }
+    #endif
+
+    /// Whether Spare can see inside the Trash, and so empty it itself. Without Full Disk Access, Finder has to.
+    var canSeeTrash: Bool {
+        #if DEBUG
+        if Self.trashStandIn != nil { return true }
+        #endif
+        return fullDiskAccess
+    }
+
     func emptyTrash() {
+        guard !TrashEmptying.shared.active else { return }
         let alert = NSAlert()
         alert.messageText = "Empty the Trash?"
         alert.informativeText = (trashBytes.map { "This permanently deletes \(Bytes.text($0)), " } ?? "This permanently deletes ")
@@ -128,41 +151,7 @@ final class Shared: ObservableObject {
         alert.addButton(withTitle: "Cancel")
         alert.buttons.first?.hasDestructiveAction = true
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        guard fullDiskAccess else {
-            // Without Full Disk Access macOS hides the Trash's contents from Spare, so Finder has to do it.
-            if let problem = Privileged.emptyTrash() {
-                banner = Banner(title: "The Trash wasn't emptied", detail: problem + " Giving Spare Full Disk Access lets it empty the Trash itself.",
-                                failed: true, next: .init(title: "Open Settings…") { Permissions.openFullDiskAccessSettings() })
-            } else {
-                banner = Banner(title: "Emptied the Trash", detail: nil)
-            }
-            HistoryModel.shared.refresh()
-            refreshSpace()
-            return
-        }
-        let before = space?.free ?? 0
-        Task {
-            // Item by item, so one item Finder would stop at doesn't keep the rest.
-            var result = await background { TrashEmptier.empty(home.appendingPathComponent(".Trash")) }
-            if !result.needsAdministrator.isEmpty {
-                let command = "rm -rf " + result.needsAdministrator.map { Privileged.quoted($0.path) }.joined(separator: " ")
-                if let problem = Privileged.run(command, prompt: "Spare wants to delete items in the Trash that belong to the system."), problem != "Cancelled." {
-                    result.failed += result.needsAdministrator.map { ($0, problem) }
-                } else {
-                    let left = result.needsAdministrator.filter { FileManager.default.fileExists(atPath: $0.path) }
-                    result.removed += result.needsAdministrator.count - left.count
-                    result.failed += left.map { ($0, "Still there; it needs an administrator to delete.") }
-                }
-            }
-            self.refreshSpace()
-            HistoryModel.shared.refresh()
-            let freed = max(0, (self.space?.free ?? before) - before)
-            let problems = result.failed.map { "\($0.0.lastPathComponent): \($0.1)" }
-            self.banner = problems.isEmpty
-                ? Banner(title: "Emptied the Trash", detail: freed > 0 ? "\(Bytes.text(freed)) is free again." : nil)
-                : Banner(title: result.removed > 0 ? "Emptied the Trash, except \(problems.count == 1 ? "1 item" : "\(problems.count) items")" : "The Trash wasn't emptied",
-                         detail: nil, problems: problems, failed: true)
-        }
+        TrashEmptying.shared.start()
     }
 }
 
