@@ -332,6 +332,17 @@ check(emptied.removed == 3 && emptied.needsAdministrator.isEmpty && emptied.fail
       && (try? fm.contentsOfDirectory(atPath: fakeTrash.path))?.isEmpty == true,
       "empties a Trash folder, unlocking locked files and read-only folders (\(emptied.removed) removed)")
 
+// An app's data container carries "deny delete" access rules; emptying removes them and deletes it.
+let container = folder("acl-trash/com.example.app")
+write("acl-trash/com.example.app/Data/prefs.plist", bytes: 100)
+let aclSet = Process()
+aclSet.executableURL = URL(fileURLWithPath: "/bin/chmod")
+aclSet.arguments = ["-R", "+a", "everyone deny delete,delete_child", container.path]
+try? aclSet.run(); aclSet.waitUntilExit()
+let aclRun = TrashEmptier.empty(root.appendingPathComponent("acl-trash"))
+check(aclSet.terminationStatus == 0 && aclRun.removed == 1 && aclRun.needsAdministrator.isEmpty && !fm.fileExists(atPath: container.path),
+      "empties a folder whose access rules deny deleting, as an app's data container's do")
+
 // Emptying reports as it goes: counting first, then deleting file by file inside a folder, ending at the full size.
 for index in 0..<400 { write("progress-trash/project/src/file\(index).bin", bytes: 100) }
 write("progress-trash/single.bin", bytes: 100)

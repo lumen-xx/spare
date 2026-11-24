@@ -69,7 +69,12 @@ final class Shared: ObservableObject {
     @Published private(set) var fullDiskAccess = Permissions.fullDiskAccess()
     /// Unknown without Full Disk Access: macOS hides the Trash's contents.
     @Published private(set) var trashBytes: Int64?
+    /// Whether there's anything in the Trash. Known at once after Spare moves something there, long before a large
+    /// Trash is measured again, and without Full Disk Access from what Spare itself moved.
+    @Published private(set) var trashHasItems = false
     @Published var banner: Banner?
+    /// Counts Trash measurements, so one that finishes late never replaces a newer answer.
+    private var trashReading = 0
 
     init() { refreshSpace() }
 
@@ -81,6 +86,7 @@ final class Shared: ObservableObject {
         self.space = space
         fullDiskAccess = true
         trashBytes = 1_240_000_000
+        trashHasItems = true
     }
     #endif
 
@@ -100,12 +106,34 @@ final class Shared: ObservableObject {
                 AppsModel.shared.loadIfStarted()
             }
         }
+        trashReading += 1
+        let reading = trashReading
+        // Without Full Disk Access the Trash can't be read; what Spare moved there itself still counts.
         guard canSeeTrash else { trashBytes = nil; return }
         let trash = Self.trashFolder
         Task {
+            // Whether there's anything at all is quick to tell; measuring a large Trash can take a while.
+            let names = await background { (try? FileManager.default.contentsOfDirectory(atPath: trash.path)) ?? [] }
+            guard reading == self.trashReading else { return }
+            self.trashHasItems = names.contains { $0 != ".DS_Store" }
+            guard self.trashHasItems else { self.trashBytes = 0; return }
             let usage = await background { DiskUsage.measure(trash) }
+            guard reading == self.trashReading else { return }
             self.trashBytes = usage.bytes + usage.shared
         }
+    }
+
+    /// Something just went to the Trash: say so at once, with its size, and measure the whole Trash again behind it.
+    func movedToTrash(bytes: Int64) {
+        trashHasItems = true
+        if let trashBytes { self.trashBytes = trashBytes + bytes }
+        refreshSpace()
+    }
+
+    /// Finder emptied the Trash. Without Full Disk Access that can't be checked, so take its word.
+    func trashEmptied() {
+        trashHasItems = false
+        refreshSpace()
     }
 
     /// Tells the person what happened after a move: how much, how to undo it, what didn't work.
@@ -624,6 +652,7 @@ final class HistoryModel: ObservableObject {
 
     func add(_ session: TrashSession) {
         sessions.insert(session, at: 0)
+        Shared.shared.movedToTrash(bytes: session.bytes)
         #if DEBUG
         if Demo.isOn { return }
         #endif

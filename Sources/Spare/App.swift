@@ -319,10 +319,11 @@ struct DiskSummary: View {
                     .contentTransition(.numericText())
                     .animation(Motion.count, value: space.free)
                 // What macOS can clear by itself is on the Purgeable Space page; here only what's free.
-                if let trash = shared.trashBytes, trash > 0 {
+                if shared.trashHasItems || (shared.trashBytes ?? 0) > 0 {
                     RowDivider().padding(.vertical, 2)
                     HStack {
-                        Text("Trash: \(Bytes.text(trash))").font(.spare(size: 11).monospacedDigit()).foregroundStyle(.secondary)
+                        Text(shared.trashBytes.flatMap { $0 > 0 ? "Trash: \(Bytes.text($0))" : nil } ?? "Trash")
+                            .font(.spare(size: 11).monospacedDigit()).foregroundStyle(.secondary)
                             .contentTransition(.numericText())
                         Spacer()
                         Button("Empty…") { shared.emptyTrash() }.spareButton(.quiet).controlSize(.small)
@@ -331,6 +332,7 @@ struct DiskSummary: View {
                 }
             }
             .animation(Motion.settle, value: shared.trashBytes)
+            .animation(Motion.settle, value: shared.trashHasItems)
             .accessibilityElement(children: .contain)
         }
     }

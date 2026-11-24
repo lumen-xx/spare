@@ -72,6 +72,7 @@ final class TrashEmptying: ObservableObject {
             // Spare up while it works, so the screen gets a moment to appear first.
             try? await Task.sleep(nanoseconds: 450_000_000)
             let problem = Privileged.emptyTrash()
+            if problem == nil { shared.trashEmptied() }
             await finish(shown: shown, banner: problem.map {
                 Shared.Banner(title: "The Trash wasn't emptied", detail: $0 + " Giving Spare Full Disk Access lets it empty the Trash itself.",
                               failed: true, next: .init(title: "Open Settings…") { Permissions.openFullDiskAccessSettings() })
@@ -98,6 +99,18 @@ final class TrashEmptying: ObservableObject {
                 let left = result.needsAdministrator.filter { FileManager.default.fileExists(atPath: $0.path) }
                 result.removed += result.needsAdministrator.count - left.count
                 result.failed += left.map { ($0, "Still there; it needs an administrator to delete.") }
+            }
+        }
+
+        // macOS protects some items even from an administrator, such as an app's data container. Finder may delete
+        // those, and by now they're all that's left, so Finder empties the rest.
+        if !result.failed.isEmpty, !result.stopped {
+            status.step = .finder
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            if Privileged.emptyTrash() == nil {
+                let left = result.failed.filter { FileManager.default.fileExists(atPath: $0.0.path) }
+                result.removed += result.failed.count - left.count
+                result.failed = left
             }
         }
 

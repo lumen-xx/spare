@@ -244,9 +244,11 @@ public enum TrashEmptier {
         }
     }
 
-    /// Clears the "locked" flag and gives the owner write access throughout, which deleting needs.
+    /// Clears the "locked" flag, removes access rules such as the "deny delete" an app's data container carries, and
+    /// gives the owner write access throughout, which deleting needs.
     static func unlock(_ url: URL) {
-        for (tool, arguments) in [("/usr/bin/chflags", ["-R", "nouchg", url.path]), ("/bin/chmod", ["-R", "u+rwX", url.path])] {
+        for (tool, arguments) in [("/usr/bin/chflags", ["-R", "nouchg", url.path]), ("/bin/chmod", ["-R", "-N", url.path]),
+                                  ("/bin/chmod", ["-R", "u+rwX", url.path])] {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: tool)
             process.arguments = arguments
