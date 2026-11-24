@@ -385,6 +385,24 @@ check(vpns.first?.name == "Tailscale" && vpns.first?.state == "Connected" && vpn
 check(SystemChanges.profiles("There are no configuration profiles installed for user 'lumen'").isEmpty
       && SystemChanges.profiles("_computerlevel[1] attribute: profileIdentifier: com.vendor.mdm\n").first?.detail == "For the whole Mac", "reads configuration profiles")
 
+// VPN apps that run their own service show up with it, and their tool says whether they're connected.
+let vpnDaemons = folder("vpn-daemons")
+for (label, program) in [("net.mullvad.daemon", "/Applications/Mullvad VPN.app/Contents/Resources/mullvad-daemon"),
+                         ("com.vendor.updater", "/Applications/Vendor.app/Contents/MacOS/updater")] {
+    (["Label": label, "ProgramArguments": [program], "KeepAlive": true] as NSDictionary)
+        .write(to: vpnDaemons.appendingPathComponent(label + ".plist"), atomically: true)
+}
+let vpnServiceRows = SystemChanges.vpnServices(LaunchItem.load(vpnDaemons, scope: .system), running: { _ in true },
+                                               status: { tool, arguments in tool.hasSuffix("/mullvad") && arguments == ["status"] ? "Connected\n    Relay: x" : nil },
+                                               appName: { $0.deletingPathExtension().lastPathComponent })
+check(vpnServiceRows.count == 1 && vpnServiceRows[0].name == "Mullvad VPN" && vpnServiceRows[0].connected == true && vpnServiceRows[0].state == "Connected"
+      && vpnServiceRows[0].control == .tool(path: "/Applications/Mullvad VPN.app/Contents/Resources/mullvad", connect: ["connect"], disconnect: ["disconnect"])
+      && { if case .removeService("net.mullvad.daemon", let plist, .system) = vpnServiceRows[0].action { plist.hasSuffix("/vpn-daemons/net.mullvad.daemon.plist") } else { false } }(),
+      "finds VPN apps that run their own service, with their connection (\(vpnServiceRows.map(\.name)))")
+check(vpns.first?.control == .configuration("Tailscale") && vpns.first?.connected == true && vpns.first?.removable == false
+      && SystemChanges.vpns("* (Disconnected)   0000 VPN (com.apple.neplugin.IKEv2) \"Office\"   [VPN:com.apple.neplugin.IKEv2]\n") { _ in nil }.first?.action == .removeConfiguration("Office"),
+      "VPN configurations connect and disconnect; ones that came with macOS can be removed")
+
 let profilerXML: [[String: Any]] = [["_items": [["_name": "spconfigprofile_section_deviceconfigprofiles", "_items": [
     ["_name": "Spare Privacy", "spconfigprofile_profile_identifier": "com.opyuii.spare.debloat",
      "spconfigprofile_install_date": "Wednesday, 14. October 2026 at 01:53:35 CEST (2026-10-13 23:53:35 +0000)",

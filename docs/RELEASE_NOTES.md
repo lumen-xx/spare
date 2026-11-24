@@ -1,4 +1,4 @@
-# Spare 0.5.6
+# Spare 0.5.7
 
-- **Empty the Trash right after a cleanup.** The Trash and its Empty button show in the sidebar as soon as anything goes to the Trash, from any page, instead of after the whole Trash has been measured again. Without Full Disk Access they show for what Spare moved.
-- **App data no longer stops the Trash from emptying.** Spare removes the “deny delete” rules an app's data container carries, and what macOS still protects is handed to Finder to delete.
+- **Every VPN on the VPN page.** Besides configurations in Network settings, it now lists VPN apps that run their own background service, such as Mullvad, OpenVPN, Cisco AnyConnect, GlobalProtect, FortiClient, ZeroTier and Cloudflare WARP.
+- **Connect, disconnect and remove VPNs.** Configurations connect and disconnect through macOS, and Mullvad through its own tool. Configurations that came with macOS or whose app is gone can be removed, and a VPN app's background service can be stopped and moved to the Trash, where History can put it back.

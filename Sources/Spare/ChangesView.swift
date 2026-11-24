@@ -38,6 +38,17 @@ final class SystemChangesModel: ObservableObject {
         rows += SystemChanges.printers(devices: Shell.run("/usr/bin/lpstat", ["-v"], timeout: 20).output,
                                        states: Shell.run("/usr/bin/lpstat", ["-p"], timeout: 20).output)
         rows += SystemChanges.vpns(Shell.run("/usr/sbin/scutil", ["--nc", "list"], timeout: 20).output) { AppLookup.name(for: $0) }
+        // VPN apps that run their own tunnel, such as Mullvad, never appear in Network settings.
+        var services = Launchd.services(domain: "system")
+        services.merge(Launchd.services(domain: "gui/\(getuid())")) { system, _ in system }
+        rows += SystemChanges.vpnServices(LaunchItem.all(home: home, apps: []),
+                                          running: { services[$0.label]?.pid != nil },
+                                          status: { tool, arguments in
+                                              guard FileManager.default.isExecutableFile(atPath: tool) else { return nil }
+                                              let result = Shell.run(tool, arguments, timeout: 10)
+                                              return result.status == 0 ? result.output : nil
+                                          },
+                                          appName: { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") })
         // The whole Mac's profiles and the person's, then any `profiles list` knows that the first missed.
         let listed = SystemChanges.profiles(systemProfiler: Data(Shell.run("/usr/sbin/system_profiler", ["-xml", "SPConfigurationProfileDataType"], timeout: 30).output.utf8))
         rows += listed
@@ -64,8 +75,43 @@ final class SystemChangesModel: ObservableObject {
         case .deletePrinter(let queue):
             let read = Shell.run("/usr/bin/lpstat", ["-p", queue], timeout: 10)
             return read.status == 0 || !(read.output.contains("Invalid destination") || read.output.contains("not exist"))
+        case .removeService(_, let plist, _):
+            return FileManager.default.fileExists(atPath: plist)
         default:
             return rows.contains { $0.id == item.id }
+        }
+    }
+
+    /// Connects or disconnects VPNs: configurations through macOS, the rest through their app's own tool.
+    func setConnected(_ on: Bool, _ chosen: [SystemChange]) async {
+        let controls = chosen.compactMap(\.control)
+        guard !controls.isEmpty, !working else { return }
+        working = true
+        defer { working = false }
+        let problems: [String] = await background {
+            controls.compactMap { control in
+                let result: (status: Int32, output: String)
+                let name: String
+                switch control {
+                case .configuration(let configuration):
+                    name = configuration
+                    let run = Shell.run("/usr/sbin/scutil", ["--nc", on ? "start" : "stop", configuration], timeout: 20)
+                    result = (run.status, run.output)
+                case .tool(let path, let connect, let disconnect):
+                    name = URL(fileURLWithPath: path).lastPathComponent
+                    let run = Shell.run(path, on ? connect : disconnect, timeout: 30)
+                    result = (run.status, run.output)
+                }
+                let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                return result.status == 0 ? nil : "\(name): " + (output.isEmpty ? "exit \(result.status)" : output)
+            }
+        }
+        // Connecting takes a moment to settle.
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        await reload()
+        if !problems.isEmpty {
+            Shared.shared.banner = .init(title: on ? "Couldn't connect" : "Couldn't disconnect", detail: problems.count == 1 ? problems[0] : nil,
+                                         problems: problems.count == 1 ? [] : problems, failed: true)
         }
     }
 
@@ -83,6 +129,7 @@ final class SystemChangesModel: ObservableObject {
         var asAdministrator: [(name: String, command: String)] = []
         var mine: [PrivacyTool.Decision] = [], everyone: [PrivacyTool.Decision] = []
         var accounts: [(title: String, name: String)] = []
+        var services: [(title: String, label: String, plist: URL, scope: LaunchItem.Scope)] = []
         for item in items {
             switch item.action {
             case .deleteAccount(let name):
@@ -92,6 +139,10 @@ final class SystemChangesModel: ObservableObject {
                 asAdministrator.append((item.name, Debloat.removeProfileCommand(identifier)))
             case .deletePrinter(let queue):
                 asAdministrator.append((item.name, "lpadmin -x \(Privileged.quoted(queue))"))
+            case .removeConfiguration(let name):
+                asAdministrator.append((item.name, "networksetup -removenetworkservice \(Privileged.quoted(name))"))
+            case .removeService(let label, let plist, let scope):
+                services.append((item.name, label, URL(fileURLWithPath: plist), scope))
             case .resetPrivacy(let service, let client, let systemWide):
                 let decision = PrivacyTool.Decision(service: service, client: client,
                                                     label: "\(item.name) (\(SystemChanges.services[service] ?? service.replacingOccurrences(of: "kTCCService", with: "")))")
@@ -153,6 +204,27 @@ final class SystemChangesModel: ObservableObject {
                 problems += (result.output ?? "").split(whereSeparator: \.isNewline).map { String($0) }.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             }
         }
+        if !services.isEmpty {
+            // Stopped first, then their files go to the Trash, so History can put them back. Your own need no password.
+            let uid = getuid()
+            let yours = services.filter { $0.scope == .user }
+            for service in yours { _ = await background { Shell.run("/bin/launchctl", ["bootout", "gui/\(uid)/\(service.label)"], timeout: 20) } }
+            if !yours.isEmpty {
+                let outcome = await Trasher.move(yours.map { ($0.plist, nil) }, title: yours.count == 1 ? "Removed \(yours[0].title)" : "Removed \(yours.count) VPN services")
+                problems += outcome.failures.map { "\($0.url.lastPathComponent): \($0.reason)" }
+            }
+            let guarded = services.filter { $0.scope != .user }
+            if !guarded.isEmpty {
+                let stops = guarded.map { "launchctl bootout \($0.scope == .system ? "system" : "gui/\(uid)")/\(Privileged.quoted($0.label))" }
+                if let records = AdminTrash.move(guarded.map(\.plist), before: stops,
+                                                 prompt: "Spare wants to remove \(guarded.count == 1 ? guarded[0].title + "'s background service" : "\(guarded.count) VPN services")."),
+                   !records.isEmpty {
+                    HistoryModel.shared.add(TrashSession(title: guarded.count == 1 ? "Removed \(guarded[0].title)" : "Removed \(guarded.count) VPN services",
+                                                         records: records, bytes: 0))
+                }
+            }
+            StartupModel.shared.reloadIfStarted()
+        }
         await reload()
         DebloatModel.shared.reloadIfStarted()
         // Accounts and printers are asked about one by one, so a listing that failed never counts as deleted.
@@ -167,7 +239,7 @@ final class SystemChangesModel: ObservableObject {
         if !left.isEmpty, problems.isEmpty {
             problems = left.map { "\($0.name) is still there." }
         }
-        let verb = items.allSatisfy { switch $0.action { case .deletePrinter, .removeProfile: true; default: false } } ? "Removed" : "Deleted"
+        let verb = items.allSatisfy { switch $0.action { case .deletePrinter, .removeProfile, .removeConfiguration, .removeService: true; default: false } } ? "Removed" : "Deleted"
         Shared.shared.banner = .init(title: done == 0 ? "Nothing was \(verb.lowercased())" : done == 1 ? "\(verb) 1 item" : "\(verb) \(done) items",
                                      detail: left.isEmpty ? nil : problems.count == 1 ? problems[0] : left.count == 1 ? "macOS kept 1 item." : "macOS kept \(left.count) items.",
                                      problems: problems.count == 1 ? [] : problems, failed: done == 0,
@@ -211,7 +283,13 @@ struct ChangesView: View {
                     .font(.spare(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
                 if model.working { ThinkingDots() }
-                if kind != .vpn && (kind != .profile || mine.contains(where: \.removable)) {
+                if kind == .vpn {
+                    let connect = !chosen.contains { $0.connected == true }
+                    Button(connect ? "Connect" : "Disconnect") { let rows = chosen; Task { await model.setConnected(connect, rows) } }
+                        .spareButton(.secondary)
+                        .disabled(!chosen.contains { $0.control != nil } || model.working)
+                }
+                if kind != .profile || mine.contains(where: \.removable) {
                     Button(actionTitle + "…", role: .destructive) { confirming = true }
                         .spareButton(.secondary)
                         .disabled(!chosen.contains(where: \.removable) || model.working)
@@ -262,6 +340,17 @@ struct ChangesView: View {
         .contextMenu(forSelectionType: SystemChange.ID.self) { ids in
             let rows = mine.filter { ids.contains($0.id) }
             if let settings = settingsURL(rows) { Button("Open Settings…") { NSWorkspace.shared.open(settings) } }
+            if kind == .vpn {
+                if rows.contains(where: { $0.control != nil && $0.connected != true }) {
+                    Button("Connect") { Task { await model.setConnected(true, rows) } }
+                }
+                if rows.contains(where: { $0.connected == true }) {
+                    Button("Disconnect") { Task { await model.setConnected(false, rows) } }
+                }
+                if rows.contains(where: { if case .removeService = $0.action { true } else { false } }) {
+                    Button("Show in Background Items") { Navigation.shared.page = .background }
+                }
+            }
             if rows.contains(where: { $0.origin == .spare }) {
                 Button("Show in Spare") { Navigation.shared.page = .intelligence }
             }
@@ -278,7 +367,7 @@ struct ChangesView: View {
         }
     }
 
-    private var actionTitle: String { kind == .printer || kind == .profile ? "Remove" : "Delete" }
+    private var actionTitle: String { kind == .printer || kind == .profile || kind == .vpn ? "Remove" : "Delete" }
 
     private var confirmTitle: String {
         let count = chosen.filter(\.removable).count
@@ -286,6 +375,7 @@ struct ChangesView: View {
         case .privacy: return count == 1 ? "Delete this permission?" : "Delete \(count) permissions?"
         case .account: return count == 1 ? "Delete this hidden account?" : "Delete \(count) hidden accounts?"
         case .profile: return "Remove “Spare Privacy”?"
+        case .vpn: return count == 1 ? "Remove this VPN?" : "Remove \(count) VPNs?"
         default: return count == 1 ? "Remove this printer?" : "Remove \(count) printers?"
         }
     }
@@ -294,6 +384,7 @@ struct ChangesView: View {
         switch kind {
         case .privacy: "macOS deletes these entries from its permission database. An app that's still installed asks again the next time it needs access. Entries for every account need an administrator password."
         case .profile: "Everything it keeps switched off under Privacy & Debloat is as macOS has it again, and macOS may download Apple Intelligence's models again. macOS asks for an administrator password."
+        case .vpn: "Configurations are removed from Network settings. A VPN app's own background service is stopped and its file goes to the Trash, so History can put it back; the app itself stays until you uninstall it under Apps. macOS asks for an administrator password."
         case .account: "These accounts were created by installers to run their helpers; nobody logs in with them. This can't be undone from the Trash, and macOS asks for an administrator password."
         default: "You can add the printer again in Printers & Scanners settings. macOS asks for an administrator password."
         }
@@ -303,7 +394,7 @@ struct ChangesView: View {
         switch kind {
         case .account: "Accounts on this Mac besides yours and macOS's own. Hidden accounts were made by installers to run their helpers."
         case .printer: "Printers added to this Mac. Their drivers are under Drivers."
-        case .vpn: "VPN configurations apps added. They go with their app, or in Network settings."
+        case .vpn: "VPNs on this Mac: configurations in Network settings, and VPN apps that run their own background service, such as Mullvad. Connect, disconnect or remove them here."
         case .profile: "Configuration profiles that change settings or allow management of this Mac. Spare's own can be removed here; others only in Settings."
         case .privacy: "Permissions you gave or refused apps and tools: camera, microphone, screen recording, files and more. Deleting one means the app asks again next time. Tools known only by their path that apply to every account can be removed only in System Settings."
         }
@@ -313,7 +404,7 @@ struct ChangesView: View {
         switch kind {
         case .account: "No accounts besides yours."
         case .printer: "No printers have been added."
-        case .vpn: "No VPN configurations."
+        case .vpn: "No VPNs."
         case .profile: "No configuration profiles are installed."
         case .privacy: shared.fullDiskAccess ? "No permissions given to apps." : "Spare needs Full Disk Access to read these."
         }

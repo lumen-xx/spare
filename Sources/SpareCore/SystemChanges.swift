@@ -18,6 +18,10 @@ public struct SystemChange: Identifiable, Sendable, Hashable {
         case resetPrivacy(service: String, client: String, systemWide: Bool)
         /// Remove a configuration profile Spare installed (needs an administrator).
         case removeProfile(String)
+        /// Remove a VPN configuration from Network settings by its name (needs an administrator).
+        case removeConfiguration(String)
+        /// Stop a VPN's own background service and move its launchd file to the Trash. `scope` is where the file is.
+        case removeService(label: String, plist: String, scope: LaunchItem.Scope)
         /// Only System Settings can change it.
         case settings(String)
     }
@@ -33,6 +37,18 @@ public struct SystemChange: Identifiable, Sendable, Hashable {
     public var ownerGone = false
     public var origin: Origin
     public var action: Action
+    /// How Spare connects and disconnects it, for a VPN it can.
+    public var control: Control?
+    /// Connected right now, when that's known.
+    public var connected: Bool?
+
+    /// Ways of connecting and disconnecting a VPN.
+    public enum Control: Sendable, Hashable {
+        /// A configuration macOS knows, by name: `scutil --nc start` and `stop`.
+        case configuration(String)
+        /// The VPN app's own command-line tool.
+        case tool(path: String, connect: [String], disconnect: [String])
+    }
 
     public var removable: Bool {
         switch action {
@@ -116,7 +132,9 @@ public enum SystemChanges {
 
     // MARK: VPN
 
-    /// `scutil --nc list`: `* (Connected)  UUID VPN (io.vendor.app) "Name"  [VPN:io.vendor.app]`.
+    /// `scutil --nc list`: `* (Connected)  UUID VPN (io.vendor.app) "Name"  [VPN:io.vendor.app]`. Each can be connected
+    /// and disconnected. One that came with macOS (no app named) or whose app is gone can be removed here; an app's own
+    /// goes with the app, or in Network settings.
     public static func vpns(_ text: String, appName: (String) -> String?) -> [SystemChange] {
         text.split(separator: "\n").compactMap { raw in
             let line = String(raw)
@@ -129,8 +147,55 @@ public enum SystemChanges {
                 middle.firstIndex(of: ")").map { String(middle[middle.index(after: start)..<$0]) }
             }
             let owner = bundle.flatMap(appName)
-            return SystemChange(kind: .vpn, id: "vpn:" + name + (bundle ?? ""), name: name, detail: bundle,
-                                state: state, owner: owner, ownerGone: bundle != nil && owner == nil, action: .settings(networkSettings))
+            let builtIn = bundle == nil || bundle!.hasPrefix("com.apple.")
+            let gone = !builtIn && owner == nil
+            var row = SystemChange(kind: .vpn, id: "vpn:" + name + (bundle ?? ""), name: name, detail: bundle,
+                                   state: state, owner: builtIn ? "macOS" : owner, ownerGone: gone,
+                                   action: builtIn || gone ? .removeConfiguration(name) : .settings(networkSettings))
+            row.control = .configuration(name)
+            row.connected = state == "Connected"
+            return row
+        }
+    }
+
+    /// Words in the label or program of a VPN app's own background service: VPNs that run their own tunnel rather
+    /// than a configuration in Network settings, such as Mullvad's.
+    public static let vpnServiceMarkers = [
+        "mullvad", "openvpn", "wireguard", "tunnelblick", "viscosity", "nordvpn", "expressvpn", "protonvpn", "surfshark",
+        "privateinternetaccess", "windscribe", "cyberghost", "ipvanish", "hotspotshield", "purevpn", "vyprvpn", "astrill",
+        "anyconnect", "vpnagentd", "globalprotect", "paloaltonetworks", "forticlient", "fortinet", "pulsesecure", "ivanti",
+        "zerotier", "cloudflare.1dot1dot1dot1", "warp-svc", "tailscaled", "netbird", "nebula", "zscaler", "twingate",
+        "hamachi", "softether", "strongswan", "openconnect", "netextender", "perimeter81", "checkpoint.vpn"
+    ]
+
+    /// VPN apps' command-line tools: where the tool sits in the app, how it connects and disconnects, and how it
+    /// reports. Its first line of `status` starts with "Connected" when it is.
+    public static let vpnTools: [(label: String, path: String, connect: [String], disconnect: [String], status: [String])] = [
+        ("net.mullvad.", "Contents/Resources/mullvad", ["connect"], ["disconnect"], ["status"])
+    ]
+
+    /// VPN apps' own background services among launchd jobs. `running` says whether a job's process is running,
+    /// `status` runs a VPN tool with arguments and returns what it printed, and `appName` names the app at a URL.
+    public static func vpnServices(_ jobs: [LaunchItem], running: (LaunchItem) -> Bool, status: (String, [String]) -> String?,
+                                   appName: (URL) -> String?) -> [SystemChange] {
+        jobs.compactMap { job in
+            let text = ([job.label, job.program ?? ""] + job.associatedBundleIDs).joined(separator: " ").lowercased()
+            guard vpnServiceMarkers.contains(where: { text.contains($0) }) else { return nil }
+            let app = job.programApp
+            let owner = app.flatMap(appName)
+            var row = SystemChange(kind: .vpn, id: "vpn-service:" + job.label, name: owner ?? job.label,
+                                   detail: "Its own background service, \(job.label)", state: running(job) ? "Running" : "Not running",
+                                   owner: owner, ownerGone: !job.programExists,
+                                   action: .removeService(label: job.label, plist: job.url.path, scope: job.scope))
+            if let app, let tool = vpnTools.first(where: { job.label.hasPrefix($0.label) }) {
+                let path = app.appendingPathComponent(tool.path).path
+                row.control = .tool(path: path, connect: tool.connect, disconnect: tool.disconnect)
+                if let reply = status(path, tool.status)?.split(separator: "\n").first.map(String.init) {
+                    row.connected = reply.hasPrefix("Connected")
+                    row.state = row.connected == true ? "Connected" : reply.hasPrefix("Disconnected") ? "Disconnected" : reply
+                }
+            }
+            return row
         }
     }
 
